@@ -12,11 +12,11 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Copy the application code
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p data database logs models
+RUN mkdir -p data logs models
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -26,4 +26,4 @@ ENV PYTHONPATH=/app
 EXPOSE 8501
 
 # Command to run the application
-CMD ["python", "run_dashboard.py"]
+CMD ["python", "run_bot.py"]
