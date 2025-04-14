@@ -1,6 +1,8 @@
 import os
 from dotenv import load_dotenv
 from pathlib import Path
+from typing import Dict, List, Optional, Any
+import logging
 
 # Load environment variables
 load_dotenv()
@@ -172,4 +174,92 @@ MIN_VOLUME_USDT = float(os.getenv('MIN_VOLUME_USDT', '100000'))  # Minimum 24h v
 MIN_SPREAD_PCT = float(os.getenv('MIN_SPREAD_PCT', '0.001'))  # Maximum spread
 MAX_SLIPPAGE_PCT = float(os.getenv('MAX_SLIPPAGE_PCT', '0.002'))  # Maximum slippage
 MIN_PROFIT_PCT = float(os.getenv('MIN_PROFIT_PCT', '0.003'))  # Minimum profit target
-MAX_TRADE_DURATION = int(os.getenv('MAX_TRADE_DURATION', '300'))  # Maximum trade duration in seconds 
+MAX_TRADE_DURATION = int(os.getenv('MAX_TRADE_DURATION', '300'))  # Maximum trade duration in seconds
+
+# Set up logging configuration
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Exchange API credentials
+API_KEY = os.environ.get('API_KEY', '')
+API_SECRET = os.environ.get('API_SECRET', '')
+EXCHANGE = os.environ.get('EXCHANGE', 'binance')
+
+# Trading parameters
+DEFAULT_TRADING_PAIRS = ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'ADA/USDT', 'SOL/USDT']
+DEFAULT_TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d']
+
+# Technical analysis parameters
+RSI_PERIOD = 14
+RSI_OVERBOUGHT = 70
+RSI_OVERSOLD = 30
+
+MACD_FAST = 12
+MACD_SLOW = 26
+MACD_SIGNAL = 9
+
+EMA_SHORT = 9
+EMA_MEDIUM = 21
+EMA_LONG = 50
+
+BB_PERIOD = 20
+BB_STD_DEV = 2
+
+VWAP_PERIOD = 14
+
+SUPERTREND_PERIOD = 10
+SUPERTREND_MULTIPLIER = 3
+
+STOCHASTIC_K_PERIOD = 14
+STOCHASTIC_D_PERIOD = 3
+STOCHASTIC_OVERBOUGHT = 80
+STOCHASTIC_OVERSOLD = 20
+
+# Technical agent weights for Meta-Agent
+TECHNICAL_AGENT_WEIGHTS: Dict[str, float] = {
+    'rsi': 0.15,
+    'macd': 0.20,
+    'ema': 0.15,
+    'bollinger': 0.15,
+    'vwap': 0.10,
+    'supertrend': 0.15,
+    'stochastic': 0.10
+}
+
+# Global agent type weights for Meta-Agent
+AGENT_WEIGHTS: Dict[str, float] = {
+    'technical': 0.4,   # Combined weight for all technical agents
+    'sentiment': 0.2,   # Weight for sentiment analysis
+    'predictive': 0.3,  # Weight for predictive models
+    'rl': 0.1           # Weight for reinforcement learning
+}
+
+# Risk management parameters
+MAX_POSITION_SIZE_PCT = 0.02  # Max 2% of portfolio per position
+MAX_OPEN_POSITIONS = 5        # Maximum number of concurrent open positions
+MAX_DAILY_DRAWDOWN_PCT = 0.05 # Maximum 5% daily drawdown
+STOP_LOSS_PCT = 0.02          # 2% stop loss
+TAKE_PROFIT_PCT = 0.04        # 4% take profit
+
+# Order book parameters
+ORDER_BOOK_DEPTH = 10         # Depth of order book to analyze
+
+# Backtesting parameters
+BACKTEST_START_DATE = '2023-01-01'
+BACKTEST_END_DATE = None      # None means current date
+
+# LLM API settings (for sentiment analysis)
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+OPENAI_MODEL = 'gpt-3.5-turbo'
+
+# News API settings
+NEWS_API_KEY = os.environ.get('NEWS_API_KEY', '')
+TWITTER_BEARER_TOKEN = os.environ.get('TWITTER_BEARER_TOKEN', '')
+REDDIT_CLIENT_ID = os.environ.get('REDDIT_CLIENT_ID', '')
+REDDIT_CLIENT_SECRET = os.environ.get('REDDIT_CLIENT_SECRET', '')
+
+# Dashboard settings
+DASHBOARD_PORT = 8501
+DASHBOARD_HOST = 'localhost' 

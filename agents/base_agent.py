@@ -1,76 +1,91 @@
+import abc
 import logging
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+import pandas as pd
+from typing import Dict, Any, Union, Tuple
 
-class BaseAgent(ABC):
+# Set up logging
+logger = logging.getLogger(__name__)
+
+class BaseAgent(abc.ABC):
     """
-    Base class for all trading agents.
-    All specific agents should inherit from this class and implement the required methods.
+    Abstract base class for all trading agents.
+    Defines the common interface that all agent types must implement.
     """
     
-    def __init__(self, trading_pair: str, timeframe: str = '1h'):
+    def __init__(self, symbol: str = "BTC/USDT", timeframe: str = "1h"):
         """
-        Initialize the base agent.
+        Initialize the agent with symbol and timeframe.
         
         Args:
-            trading_pair: The trading pair to analyze (e.g., 'BTC/USDT')
-            timeframe: The timeframe for analysis (e.g., '1h', '4h', '1d')
+            symbol: Trading pair symbol (e.g., BTC/USDT)
+            timeframe: Timeframe for analysis (e.g., 1m, 5m, 15m, 1h, 4h, 1d)
         """
-        self.trading_pair = trading_pair
+        self.symbol = symbol
         self.timeframe = timeframe
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.last_signal = None
-        self.last_confidence = 0.0
-        self.last_analysis_time = None
+        
+        # Initialize logging
+        self.logger = logging.getLogger(f"{self.__class__.__name__}_{symbol}_{timeframe}")
     
-    @abstractmethod
-    def analyze_market(self, data) -> Dict[str, Any]:
+    @abc.abstractmethod
+    def analyze(self, market_data: pd.DataFrame) -> Dict[str, Any]:
         """
         Analyze market data and generate trading signals.
         
         Args:
-            data: DataFrame containing market data
+            market_data: DataFrame containing OHLCV data
             
         Returns:
-            Dict containing analysis results and trading signals
+            Dict containing at minimum:
+            - signal: float between -1.0 and 1.0 (-1.0 = strong sell, 1.0 = strong buy)
+            - confidence: float between 0.0 and 1.0
+            - metadata: additional agent-specific information
         """
         pass
     
-    def get_last_signal(self) -> Optional[str]:
+    def validate_data(self, market_data: pd.DataFrame) -> bool:
         """
-        Get the last generated signal.
-        
-        Returns:
-            The last signal or None if no signal has been generated
-        """
-        return self.last_signal
-    
-    def get_last_confidence(self) -> float:
-        """
-        Get the confidence level of the last signal.
-        
-        Returns:
-            Confidence level from 0 to 1
-        """
-        return self.last_confidence
-    
-    def get_last_analysis_time(self):
-        """
-        Get the timestamp of the last analysis.
-        
-        Returns:
-            Timestamp of the last analysis or None if no analysis has been performed
-        """
-        return self.last_analysis_time
-    
-    def _update_signal_info(self, signal: str, confidence: float):
-        """
-        Update the signal information.
+        Validate that the market data contains the required columns.
         
         Args:
-            signal: The generated signal
-            confidence: The confidence level of the signal
+            market_data: DataFrame containing OHLCV data
+            
+        Returns:
+            bool: True if valid, False otherwise
         """
-        self.last_signal = signal
-        self.last_confidence = confidence
-        self.last_analysis_time = None  # Will be set by the specific agent implementation 
+        required_columns = ['open', 'high', 'low', 'close', 'volume']
+        
+        # Check if DataFrame has required columns (case-insensitive)
+        df_columns = [col.lower() for col in market_data.columns]
+        
+        for col in required_columns:
+            if col not in df_columns:
+                self.logger.error(f"Required column '{col}' not found in market data")
+                return False
+        
+        # Check if there's enough data
+        if len(market_data) < 2:
+            self.logger.error(f"Not enough data points: {len(market_data)}")
+            return False
+            
+        return True
+    
+    def get_trading_signal(self) -> Tuple[int, float]:
+        """
+        Convert the internal signal to a discrete trading signal.
+        
+        Returns:
+            Tuple of (signal, confidence) where signal is:
+            1 for buy, -1 for sell, 0 for hold
+        """
+        # Default implementation that should be overridden by concrete agents
+        result = self.analyze(None)
+        signal_value = result.get('signal', 0)
+        confidence = result.get('confidence', 0)
+        
+        # Convert continuous signal to discrete buy/sell/hold
+        if signal_value > 0.5:
+            return 1, confidence  # Buy signal
+        elif signal_value < -0.5:
+            return -1, confidence  # Sell signal
+        else:
+            return 0, confidence  # Hold 

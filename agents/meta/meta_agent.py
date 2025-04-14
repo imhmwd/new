@@ -1,262 +1,312 @@
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional, Any, Union
+import os
 import logging
+import time
+import numpy as np
+import pandas as pd
+from typing import Dict, List, Tuple, Optional, Any, Union
 
-from agents.base.agent import Agent, Signal
+# Import configs
+from configs.settings import AGENT_WEIGHTS, TECHNICAL_AGENT_WEIGHTS
+
+# Import base agent
+from agents.base_agent import BaseAgent
+
+# Import technical agents
 from agents.technical.rsi_agent import RSIAgent
 from agents.technical.macd_agent import MACDAgent
 from agents.technical.ema_agent import EMAAgent
-from agents.technical.bollinger_agent import BollingerBandsAgent
+from agents.technical.bollinger_agent import BollingerAgent
 from agents.technical.vwap_agent import VWAPAgent
 from agents.technical.supertrend_agent import SupertrendAgent
 from agents.technical.stochastic_agent import StochasticAgent
-from configs.settings import TECHNICAL_AGENT_WEIGHTS
 
-class MetaAgent(Agent):
+# Import other agent types
+from agents.sentiment.sentiment_agent import SentimentAgent
+from agents.predictive.predictive_agent import PredictiveAgent
+from agents.rl.rl_agent import RLAgent
+
+logger = logging.getLogger(__name__)
+
+class MetaAgent(BaseAgent):
     """
-    Meta-Agent that combines signals from multiple technical agents 
-    to make a final trading decision.
+    Meta agent that combines signals from multiple technical and AI-based agents.
+    Uses configurable weights to balance different signal sources.
     """
     
-    def __init__(self, symbol: str, timeframe: str, 
-                 agent_weights: Dict[str, float] = None):
+    def __init__(
+        self,
+        use_technical: bool = True,
+        use_sentiment: bool = False,
+        use_predictive: bool = False,
+        use_rl: bool = False,
+        symbol: str = "BTC/USDT",
+        timeframe: str = "1h",
+        max_lookback: int = 100
+    ):
         """
-        Initialize the Meta-Agent
+        Initialize the MetaAgent with configurable agent types.
         
         Args:
-            symbol: Trading pair symbol (e.g., BTC/USDT)
-            timeframe: Timeframe for analysis (e.g., 1m, 5m, 15m)
-            agent_weights: Weights for each technical agent (default: from settings)
+            use_technical: Whether to enable technical analysis agents
+            use_sentiment: Whether to enable sentiment analysis agent
+            use_predictive: Whether to enable predictive ML agent
+            use_rl: Whether to enable reinforcement learning agent
+            symbol: Trading pair symbol
+            timeframe: Timeframe for analysis
+            max_lookback: Maximum lookback period for historical data
         """
-        super().__init__(name="Meta", symbol=symbol, timeframe=timeframe)
+        super().__init__(symbol=symbol, timeframe=timeframe)
+        self.symbol = symbol
+        self.timeframe = timeframe
+        self.max_lookback = max_lookback
         
-        # Set agent weights (use default if not provided)
-        self.agent_weights = agent_weights or TECHNICAL_AGENT_WEIGHTS
+        # Set up agent flags
+        self.use_technical = use_technical
+        self.use_sentiment = use_sentiment
+        self.use_predictive = use_predictive
+        self.use_rl = use_rl
         
-        # Initialize agents
-        self.agents = {}
-        self._initialize_agents()
+        # Initialize technical agents if requested
+        self.technical_agents = {}
+        if self.use_technical:
+            self._initialize_technical_agents()
         
-        # Store results for detailed reporting
-        self.agent_signals = {}
-        self.agent_confidences = {}
-        self.agent_explanations = {}
-        self.confidence = 0.0
+        # Initialize AI/ML agents if requested
+        self.sentiment_agent = None
+        self.predictive_agent = None
+        self.rl_agent = None
         
-    def _initialize_agents(self):
-        """Initialize the technical agents"""
+        if self.use_sentiment:
+            self.sentiment_agent = SentimentAgent(symbol=symbol, timeframe=timeframe)
+            
+        if self.use_predictive:
+            self.predictive_agent = PredictiveAgent(symbol=symbol, timeframe=timeframe)
+            
+        if self.use_rl:
+            self.rl_agent = RLAgent(symbol=symbol, timeframe=timeframe)
+            
+        # Track the latest signals
+        self.last_signals = {}
+        self.last_update_time = 0
         
-        # Only initialize agents with weights > 0
-        if self.agent_weights.get('rsi', 0) > 0:
-            self.agents['rsi'] = RSIAgent(symbol=self.symbol, timeframe=self.timeframe)
-            
-        if self.agent_weights.get('macd', 0) > 0:
-            self.agents['macd'] = MACDAgent(symbol=self.symbol, timeframe=self.timeframe)
-            
-        if self.agent_weights.get('ema', 0) > 0:
-            self.agents['ema'] = EMAAgent(symbol=self.symbol, timeframe=self.timeframe)
-            
-        if self.agent_weights.get('bollinger', 0) > 0:
-            self.agents['bollinger'] = BollingerBandsAgent(symbol=self.symbol, timeframe=self.timeframe)
-            
-        if self.agent_weights.get('vwap', 0) > 0:
-            self.agents['vwap'] = VWAPAgent(symbol=self.symbol, timeframe=self.timeframe)
-            
-        if self.agent_weights.get('supertrend', 0) > 0:
-            self.agents['supertrend'] = SupertrendAgent(symbol=self.symbol, timeframe=self.timeframe)
-            
-        if self.agent_weights.get('stochastic', 0) > 0:
-            self.agents['stochastic'] = StochasticAgent(symbol=self.symbol, timeframe=self.timeframe)
-            
-        self.logger.info(f"Initialized {len(self.agents)} technical agents for {self.symbol} {self.timeframe}")
+        logger.info(f"MetaAgent initialized for {self.symbol} on {self.timeframe} timeframe")
+
+    def _initialize_technical_agents(self):
+        """Initialize all technical analysis agents with their respective weights"""
+        self.technical_agents = {
+            'rsi': RSIAgent(symbol=self.symbol, timeframe=self.timeframe),
+            'macd': MACDAgent(symbol=self.symbol, timeframe=self.timeframe),
+            'ema': EMAAgent(symbol=self.symbol, timeframe=self.timeframe),
+            'bollinger': BollingerAgent(symbol=self.symbol, timeframe=self.timeframe),
+            'vwap': VWAPAgent(symbol=self.symbol, timeframe=self.timeframe),
+            'supertrend': SupertrendAgent(symbol=self.symbol, timeframe=self.timeframe),
+            'stochastic': StochasticAgent(symbol=self.symbol, timeframe=self.timeframe)
+        }
         
-    def analyze(self, data: pd.DataFrame) -> Signal:
+        logger.debug(f"Initialized {len(self.technical_agents)} technical agents")
+
+    def analyze(self, market_data: pd.DataFrame) -> Dict[str, Any]:
         """
-        Analyze market data by combining signals from multiple agents
+        Analyze market data using all enabled agents and combine their signals.
         
         Args:
-            data: DataFrame containing OHLCV data
+            market_data: DataFrame containing OHLCV data
             
         Returns:
-            Signal: Trading signal enum
+            Dict containing signal, confidence, and metadata
         """
-        if not self.validate_data(data):
-            self.logger.error("Invalid data format for Meta-Agent analysis")
-            return Signal.NEUTRAL
+        if market_data.empty or len(market_data) < self.max_lookback:
+            logger.warning(f"Insufficient data for analysis: {len(market_data)} rows")
+            return {'signal': 0, 'confidence': 0, 'metadata': {}}
         
-        # Clear previous results
-        self.agent_signals = {}
-        self.agent_confidences = {}
-        self.agent_explanations = {}
+        start_time = time.time()
+        technical_signals = {}
+        ai_signals = {}
         
-        # Get signals from all agents
-        for name, agent in self.agents.items():
+        # Get signals from technical agents
+        if self.use_technical:
+            for name, agent in self.technical_agents.items():
+                try:
+                    result = agent.analyze(market_data)
+                    technical_signals[name] = result
+                    logger.debug(f"{name} agent signal: {result['signal']} with confidence {result['confidence']}")
+                except Exception as e:
+                    logger.error(f"Error getting signal from {name} agent: {str(e)}")
+                    technical_signals[name] = {'signal': 0, 'confidence': 0}
+        
+        # Get signal from sentiment agent
+        if self.use_sentiment and self.sentiment_agent:
             try:
-                signal = agent.analyze(data)
-                confidence = agent.get_confidence()
-                explanation = agent.get_explanation()
-                
-                self.agent_signals[name] = signal
-                self.agent_confidences[name] = confidence
-                self.agent_explanations[name] = explanation
-                
+                sentiment_result = self.sentiment_agent.analyze(market_data)
+                ai_signals['sentiment'] = sentiment_result
+                logger.debug(f"Sentiment agent signal: {sentiment_result['signal']} with confidence {sentiment_result['confidence']}")
             except Exception as e:
-                self.logger.error(f"Error analyzing with {name} agent: {str(e)}")
-                self.agent_signals[name] = Signal.NEUTRAL
-                self.agent_confidences[name] = 0.0
-                self.agent_explanations[name] = f"Error: {str(e)}"
+                logger.error(f"Error getting signal from sentiment agent: {str(e)}")
+                ai_signals['sentiment'] = {'signal': 0, 'confidence': 0}
         
-        # Calculate weighted signals
-        final_signal = self._calculate_combined_signal()
+        # Get signal from predictive agent
+        if self.use_predictive and self.predictive_agent:
+            try:
+                predictive_result = self.predictive_agent.analyze(market_data)
+                ai_signals['predictive'] = predictive_result
+                logger.debug(f"Predictive agent signal: {predictive_result['signal']} with confidence {predictive_result['confidence']}")
+            except Exception as e:
+                logger.error(f"Error getting signal from predictive agent: {str(e)}")
+                ai_signals['predictive'] = {'signal': 0, 'confidence': 0}
         
-        # Calculate confidence
-        self._calculate_confidence()
+        # Get signal from RL agent
+        if self.use_rl and self.rl_agent:
+            try:
+                rl_result = self.rl_agent.analyze(market_data)
+                ai_signals['rl'] = rl_result
+                logger.debug(f"RL agent signal: {rl_result['signal']} with confidence {rl_result['confidence']}")
+            except Exception as e:
+                logger.error(f"Error getting signal from RL agent: {str(e)}")
+                ai_signals['rl'] = {'signal': 0, 'confidence': 0}
         
-        return final_signal
-    
-    def _calculate_combined_signal(self) -> Signal:
-        """
-        Calculate the combined signal using weighted voting
+        # Combine all signals using configured weights
+        combined_result = self._combine_signals(technical_signals, ai_signals)
         
-        Returns:
-            Signal: Combined trading signal
-        """
-        if not self.agent_signals:
-            return Signal.NEUTRAL
-        
-        # Convert signals to numeric values for weighted sum
-        signal_values = {}
-        for name, signal in self.agent_signals.items():
-            signal_values[name] = signal.value  # Numeric value of signal enum
-        
-        # Calculate weighted sum
-        weighted_sum = 0.0
-        total_weight = 0.0
-        
-        for name, value in signal_values.items():
-            weight = self.agent_weights.get(name, 0) * self.agent_confidences.get(name, 0)
-            weighted_sum += value * weight
-            total_weight += weight
-        
-        # Calculate final signal value
-        final_value = weighted_sum / total_weight if total_weight > 0 else 0
-        
-        # Convert to Signal enum
-        if final_value >= 1.5:
-            return Signal.STRONG_BUY
-        elif final_value >= 0.5:
-            return Signal.BUY
-        elif final_value <= -1.5:
-            return Signal.STRONG_SELL
-        elif final_value <= -0.5:
-            return Signal.SELL
-        else:
-            return Signal.NEUTRAL
-    
-    def _calculate_confidence(self):
-        """Calculate overall confidence level"""
-        if not self.agent_confidences:
-            self.confidence = 0.0
-            return
-        
-        # Weighted average of confidences
-        weighted_sum = 0.0
-        total_weight = 0.0
-        
-        for name, conf in self.agent_confidences.items():
-            weight = self.agent_weights.get(name, 0)
-            weighted_sum += conf * weight
-            total_weight += weight
-        
-        self.confidence = weighted_sum / total_weight if total_weight > 0 else 0.0
-            
-    def get_confidence(self) -> float:
-        """
-        Return the confidence level of the agent's prediction
-        
-        Returns:
-            float: Confidence level between 0.0 and 1.0
-        """
-        return self.confidence
-    
-    def get_explanation(self) -> str:
-        """
-        Get explanation of the agent's reasoning
-        
-        Returns:
-            str: Explanation text
-        """
-        if not self.agent_signals:
-            return "No agent signals available for analysis"
-        
-        # Get final signal
-        final_signal = self._calculate_combined_signal()
-        
-        # Count agent votes
-        vote_counts = {
-            Signal.STRONG_BUY: 0,
-            Signal.BUY: 0,
-            Signal.NEUTRAL: 0,
-            Signal.SELL: 0,
-            Signal.STRONG_SELL: 0
+        # Update last signals and time
+        self.last_signals = {
+            'technical': technical_signals,
+            'ai': ai_signals,
+            'combined': combined_result
         }
+        self.last_update_time = time.time()
         
-        for signal in self.agent_signals.values():
-            vote_counts[signal] += 1
+        execution_time = time.time() - start_time
+        logger.info(f"MetaAgent analysis completed in {execution_time:.2f}s with signal {combined_result['signal']:.2f}")
         
-        vote_text = f"[{vote_counts[Signal.STRONG_BUY]} strong buy, {vote_counts[Signal.BUY]} buy, " \
-                   f"{vote_counts[Signal.NEUTRAL]} neutral, {vote_counts[Signal.SELL]} sell, " \
-                   f"{vote_counts[Signal.STRONG_SELL]} strong sell]"
-        
-        # Format a summary of agent recommendations
-        agent_summary = []
-        for name, signal in self.agent_signals.items():
-            conf = self.agent_confidences.get(name, 0)
-            signal_str = Signal.to_str(signal)
-            agent_summary.append(f"{name.upper()}: {signal_str} ({conf:.2f})")
-        
-        # Format the composite agent explanation
-        explanation = f"Meta-Agent analysis: {Signal.to_str(final_signal)} with {self.confidence:.2f} confidence. " \
-                     f"Vote distribution: {vote_text}.\n\n" \
-                     f"Agent signals: {', '.join(agent_summary)}"
-                     
-        return explanation
-    
-    def get_detailed_analysis(self) -> Dict[str, Any]:
+        return combined_result
+
+    def _combine_signals(self, technical_signals: Dict[str, Dict], ai_signals: Dict[str, Dict]) -> Dict[str, Any]:
         """
-        Get detailed analysis from all agents
-        
-        Returns:
-            Dict: Detailed analysis information
-        """
-        result = {
-            'final_signal': self._calculate_combined_signal(),
-            'confidence': self.confidence,
-            'agents': {}
-        }
-        
-        for name in self.agents.keys():
-            result['agents'][name] = {
-                'signal': self.agent_signals.get(name),
-                'confidence': self.agent_confidences.get(name),
-                'explanation': self.agent_explanations.get(name),
-                'weight': self.agent_weights.get(name, 0)
-            }
-            
-        return result
-        
-    def update_agent_weights(self, weights: Dict[str, float]):
-        """
-        Update the weights for each agent
+        Combine signals from all agents using weighted voting.
         
         Args:
-            weights: New weights for agents
+            technical_signals: Dict of technical agent signals
+            ai_signals: Dict of AI/ML agent signals
+            
+        Returns:
+            Dict containing combined signal, confidence, and metadata
         """
-        # Update weights
-        for name, weight in weights.items():
-            if name in self.agent_weights:
-                self.agent_weights[name] = weight
+        # Start with neutral signal
+        weighted_signal = 0
+        total_confidence = 0
+        total_weight = 0
+        
+        # Technical signals (weighted by their internal weights)
+        if technical_signals and self.use_technical:
+            tech_weighted_signal = 0
+            tech_total_confidence = 0
+            tech_total_weight = 0
+            
+            for agent_name, result in technical_signals.items():
+                if agent_name in TECHNICAL_AGENT_WEIGHTS:
+                    weight = TECHNICAL_AGENT_WEIGHTS[agent_name]
+                    signal = result.get('signal', 0)
+                    confidence = result.get('confidence', 0.5)
+                    
+                    tech_weighted_signal += signal * confidence * weight
+                    tech_total_confidence += confidence * weight
+                    tech_total_weight += weight
+            
+            # Normalize technical signal
+            if tech_total_weight > 0:
+                normalized_tech_signal = tech_weighted_signal / tech_total_weight
+                normalized_tech_confidence = tech_total_confidence / tech_total_weight
                 
-        # Re-initialize agents if needed
-        self._initialize_agents() 
+                # Add to overall signal with global technical weight
+                tech_global_weight = AGENT_WEIGHTS.get('technical', 0.4)
+                weighted_signal += normalized_tech_signal * tech_global_weight
+                total_confidence += normalized_tech_confidence * tech_global_weight
+                total_weight += tech_global_weight
+        
+        # Add sentiment signal if enabled
+        if 'sentiment' in ai_signals and self.use_sentiment:
+            sentiment_weight = AGENT_WEIGHTS.get('sentiment', 0.2)
+            sentiment_signal = ai_signals['sentiment'].get('signal', 0)
+            sentiment_confidence = ai_signals['sentiment'].get('confidence', 0.5)
+            
+            weighted_signal += sentiment_signal * sentiment_confidence * sentiment_weight
+            total_confidence += sentiment_confidence * sentiment_weight
+            total_weight += sentiment_weight
+        
+        # Add predictive signal if enabled
+        if 'predictive' in ai_signals and self.use_predictive:
+            predictive_weight = AGENT_WEIGHTS.get('predictive', 0.3)
+            predictive_signal = ai_signals['predictive'].get('signal', 0)
+            predictive_confidence = ai_signals['predictive'].get('confidence', 0.5)
+            
+            weighted_signal += predictive_signal * predictive_confidence * predictive_weight
+            total_confidence += predictive_confidence * predictive_weight
+            total_weight += predictive_weight
+        
+        # Add RL signal if enabled
+        if 'rl' in ai_signals and self.use_rl:
+            rl_weight = AGENT_WEIGHTS.get('rl', 0.1)
+            rl_signal = ai_signals['rl'].get('signal', 0)
+            rl_confidence = ai_signals['rl'].get('confidence', 0.5)
+            
+            weighted_signal += rl_signal * rl_confidence * rl_weight
+            total_confidence += rl_confidence * rl_weight
+            total_weight += rl_weight
+        
+        # Normalize final signal and confidence
+        if total_weight > 0:
+            final_signal = weighted_signal / total_weight
+            final_confidence = total_confidence / total_weight
+        else:
+            final_signal = 0
+            final_confidence = 0
+        
+        # Create metadata for logging and analysis
+        metadata = {
+            'technical_signals': technical_signals,
+            'ai_signals': ai_signals,
+            'weights': {
+                'technical': AGENT_WEIGHTS.get('technical', 0.4),
+                'sentiment': AGENT_WEIGHTS.get('sentiment', 0.2),
+                'predictive': AGENT_WEIGHTS.get('predictive', 0.3),
+                'rl': AGENT_WEIGHTS.get('rl', 0.1)
+            }
+        }
+        
+        return {
+            'signal': final_signal,
+            'confidence': final_confidence,
+            'metadata': metadata
+        }
+
+    def get_trading_signal(self) -> Tuple[int, float]:
+        """
+        Convert the continuous signal to a discrete trading signal.
+        
+        Returns:
+            Tuple of (signal, confidence) where signal is:
+            1 for buy, -1 for sell, 0 for hold
+        """
+        if not self.last_signals or not self.last_signals.get('combined'):
+            return 0, 0
+        
+        combined = self.last_signals['combined']
+        signal_value = combined.get('signal', 0)
+        confidence = combined.get('confidence', 0)
+        
+        # Convert continuous signal to discrete buy/sell/hold
+        # Using thresholds to determine actions
+        if signal_value > 0.5:
+            return 1, confidence  # Buy signal
+        elif signal_value < -0.5:
+            return -1, confidence  # Sell signal
+        else:
+            return 0, confidence  # Hold
+    
+    def get_last_update_time(self) -> float:
+        """Get the timestamp of the last signal update"""
+        return self.last_update_time
+    
+    def get_signal_breakdown(self) -> Dict[str, Any]:
+        """Get a detailed breakdown of all signals for analysis"""
+        return self.last_signals 

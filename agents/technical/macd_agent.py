@@ -1,181 +1,169 @@
-import pandas as pd
+import os
+import sys
 import numpy as np
-import talib
-from typing import Optional
+import pandas as pd
 import logging
+import time
+from typing import Dict, Any, Tuple
 
-from agents.base.agent import Agent, Signal
-from configs.settings import MACD_FAST_PERIOD, MACD_SLOW_PERIOD, MACD_SIGNAL_PERIOD
+# Add the parent directory to sys.path to import BaseAgent
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from base_agent import BaseAgent
 
-class MACDAgent(Agent):
-    """Agent that makes decisions based on Moving Average Convergence Divergence (MACD)"""
+# Set up logging
+logger = logging.getLogger(__name__)
+
+class MACDAgent(BaseAgent):
+    """
+    Trading agent based on Moving Average Convergence Divergence (MACD) indicator.
+    """
     
-    def __init__(self, symbol: str, timeframe: str, 
-                 fast_period: int = MACD_FAST_PERIOD, 
-                 slow_period: int = MACD_SLOW_PERIOD,
-                 signal_period: int = MACD_SIGNAL_PERIOD):
+    def __init__(self, symbol: str = "BTC/USDT", timeframe: str = "1h", 
+                 fast_period: int = 12, slow_period: int = 26, signal_period: int = 9,
+                 signal_threshold: float = 0.0):
         """
-        Initialize the MACD Agent
+        Initialize the MACD agent with customizable parameters.
         
         Args:
-            symbol: Trading pair symbol (e.g., BTC/USDT)
-            timeframe: Timeframe for analysis (e.g., 1m, 5m, 15m)
-            fast_period: Fast EMA period (default: from settings)
-            slow_period: Slow EMA period (default: from settings)
-            signal_period: Signal line period (default: from settings)
+            symbol: Trading pair symbol
+            timeframe: Timeframe for analysis
+            fast_period: Period for the fast EMA
+            slow_period: Period for the slow EMA
+            signal_period: Period for the signal line (EMA of MACD line)
+            signal_threshold: Threshold for signal strength to generate a buy/sell signal
         """
-        super().__init__(name="MACD", symbol=symbol, timeframe=timeframe)
+        super().__init__(symbol, timeframe)
         self.fast_period = fast_period
         self.slow_period = slow_period
         self.signal_period = signal_period
-        self.current_macd = None
-        self.current_signal = None
-        self.current_hist = None
-        self.prev_macd = None
-        self.prev_signal = None
-        self.prev_hist = None
-        self.confidence = 0.0
+        self.signal_threshold = signal_threshold
+        self.last_update_time = None
         
-    def analyze(self, data: pd.DataFrame) -> Signal:
+    def _calculate_macd(self, close_prices: pd.Series) -> Tuple[pd.Series, pd.Series, pd.Series]:
         """
-        Analyze market data using MACD indicator
+        Calculate the MACD line, signal line, and histogram.
         
         Args:
-            data: DataFrame containing OHLCV data
+            close_prices: Series of closing prices
             
         Returns:
-            Signal: Trading signal enum
+            Tuple of (macd_line, signal_line, histogram)
         """
-        if not self.validate_data(data):
-            self.logger.error("Invalid data format for MACD analysis")
-            return Signal.NEUTRAL
+        # Calculate the fast and slow EMAs
+        ema_fast = close_prices.ewm(span=self.fast_period, adjust=False).mean()
+        ema_slow = close_prices.ewm(span=self.slow_period, adjust=False).mean()
         
-        df = self.preprocess_data(data)
+        # Calculate the MACD line
+        macd_line = ema_fast - ema_slow
         
-        # Calculate MACD using talib
-        macd, signal, hist = talib.MACD(
-            df['close'].values,
-            fastperiod=self.fast_period,
-            slowperiod=self.slow_period,
-            signalperiod=self.signal_period
-        )
+        # Calculate the signal line
+        signal_line = macd_line.ewm(span=self.signal_period, adjust=False).mean()
         
-        # Store previous and current MACD values
-        if len(df) >= 2:
-            self.prev_macd = macd[-2]
-            self.prev_signal = signal[-2]
-            self.prev_hist = hist[-2]
-            
-        self.current_macd = macd[-1]
-        self.current_signal = signal[-1]
-        self.current_hist = hist[-1]
+        # Calculate the histogram (MACD line - signal line)
+        histogram = macd_line - signal_line
         
-        # Generate signal based on MACD values
-        signal = self._generate_signal()
-        
-        # Calculate confidence based on MACD histogram value
-        self._calculate_confidence()
-        
-        return signal
+        return macd_line, signal_line, histogram
     
-    def _generate_signal(self) -> Signal:
+    def analyze(self, market_data: pd.DataFrame) -> Dict[str, Any]:
         """
-        Generate trading signal based on MACD values
+        Analyze market data and generate trading signals based on MACD.
         
+        Args:
+            market_data: DataFrame containing OHLCV data
+            
         Returns:
-            Signal: Trading signal enum
+            Dict containing signal, confidence, and metadata
         """
-        if (self.current_macd is None or 
-            self.current_signal is None or 
-            self.current_hist is None or
-            self.prev_hist is None):
-            return Signal.NEUTRAL
+        start_time = time.time()
+        result = {
+            'signal': 0.0,
+            'confidence': 0.0,
+            'metadata': {}
+        }
         
-        # Bullish signals
-        if (self.prev_hist < 0 and self.current_hist > 0):
-            # Histogram crosses above zero - strong buy signal
-            return Signal.STRONG_BUY
-        elif (self.prev_macd < self.prev_signal and 
-              self.current_macd > self.current_signal):
-            # MACD crosses above signal line - buy signal
-            return Signal.BUY
+        if not self.validate_data(market_data):
+            self.logger.error("Invalid market data provided to MACD agent")
+            return result
         
-        # Bearish signals
-        elif (self.prev_hist > 0 and self.current_hist < 0):
-            # Histogram crosses below zero - strong sell signal
-            return Signal.STRONG_SELL
-        elif (self.prev_macd > self.prev_signal and 
-              self.current_macd < self.current_signal):
-            # MACD crosses below signal line - sell signal
-            return Signal.SELL
+        # Get the close prices
+        close_prices = market_data['close']
         
-        # Additional signals for strong momentum
-        elif (self.current_hist > 0 and 
-              self.current_hist > self.prev_hist * 1.5):
-            # Increasing positive histogram - possible buy
-            return Signal.BUY
-        elif (self.current_hist < 0 and 
-              self.current_hist < self.prev_hist * 1.5):
-            # Increasing negative histogram - possible sell
-            return Signal.SELL
-            
-        return Signal.NEUTRAL
-    
-    def _calculate_confidence(self):
-        """Calculate confidence level based on MACD values"""
-        if (self.current_macd is None or 
-            self.current_signal is None or 
-            self.current_hist is None):
-            self.confidence = 0.0
-            return
+        # Calculate MACD
+        macd_line, signal_line, histogram = self._calculate_macd(close_prices)
         
-        # Calculate confidence based on histogram value and relationship to signal
-        macd_signal_diff = abs(self.current_macd - self.current_signal)
+        # Store the values in the result metadata
+        result['metadata']['macd_line'] = macd_line.iloc[-1]
+        result['metadata']['signal_line'] = signal_line.iloc[-1]
+        result['metadata']['histogram'] = histogram.iloc[-1]
         
-        # Normalize the difference (typical MACD values are small relative to price)
-        # Higher difference = higher confidence
-        if self.current_hist > 0:  # Bullish
-            self.confidence = min(1.0, macd_signal_diff / abs(self.current_macd) * 2)
-        elif self.current_hist < 0:  # Bearish
-            self.confidence = min(1.0, macd_signal_diff / abs(self.current_macd) * 2)
+        # Calculate signal strength based on the histogram
+        # Normalize the histogram to get a value between -1 and 1
+        hist_max = histogram.abs().max()
+        if hist_max > 0:
+            normalized_hist = histogram.iloc[-1] / hist_max
         else:
-            self.confidence = 0.0
+            normalized_hist = 0.0
             
-    def get_confidence(self) -> float:
-        """
-        Return the confidence level of the agent's prediction
-        
-        Returns:
-            float: Confidence level between 0.0 and 1.0
-        """
-        return self.confidence
-    
-    def get_explanation(self) -> str:
-        """
-        Get explanation of the agent's reasoning
-        
-        Returns:
-            str: Explanation text
-        """
-        if (self.current_macd is None or 
-            self.current_signal is None or 
-            self.current_hist is None):
-            return "MACD values not available for analysis"
-        
-        signal = self._generate_signal()
-        
-        # Format MACD values for display
-        macd_value = f"{self.current_macd:.6f}"
-        signal_value = f"{self.current_signal:.6f}"
-        hist_value = f"{self.current_hist:.6f}"
-        
-        if signal == Signal.STRONG_BUY:
-            return f"MACD histogram({self.fast_period},{self.slow_period},{self.signal_period}) crossed above zero (MACD: {macd_value}, Signal: {signal_value}, Hist: {hist_value}). Strong buy signal."
-        elif signal == Signal.BUY:
-            return f"MACD({self.fast_period},{self.slow_period},{self.signal_period}) crossed above signal line or has increasing momentum (MACD: {macd_value}, Signal: {signal_value}, Hist: {hist_value}). Buy signal."
-        elif signal == Signal.STRONG_SELL:
-            return f"MACD histogram({self.fast_period},{self.slow_period},{self.signal_period}) crossed below zero (MACD: {macd_value}, Signal: {signal_value}, Hist: {hist_value}). Strong sell signal."
-        elif signal == Signal.SELL:
-            return f"MACD({self.fast_period},{self.slow_period},{self.signal_period}) crossed below signal line or has decreasing momentum (MACD: {macd_value}, Signal: {signal_value}, Hist: {hist_value}). Sell signal."
+        # Determine signal direction and confidence
+        if histogram.iloc[-1] > self.signal_threshold and histogram.iloc[-2] <= self.signal_threshold:
+            # Bullish crossover (histogram crossed above threshold)
+            signal = normalized_hist
+            confidence = min(abs(normalized_hist) * 1.5, 1.0)  # Scale confidence
+        elif histogram.iloc[-1] < -self.signal_threshold and histogram.iloc[-2] >= -self.signal_threshold:
+            # Bearish crossover (histogram crossed below negative threshold)
+            signal = normalized_hist
+            confidence = min(abs(normalized_hist) * 1.5, 1.0)  # Scale confidence
         else:
-            return f"MACD({self.fast_period},{self.slow_period},{self.signal_period}) values are neutral (MACD: {macd_value}, Signal: {signal_value}, Hist: {hist_value})." 
+            # No clear crossover, but still provide the trend direction with lower confidence
+            signal = normalized_hist / 2  # Reduce signal strength for non-crossovers
+            confidence = min(abs(normalized_hist), 0.5)  # Lower confidence without crossover
+            
+        result['signal'] = signal
+        result['confidence'] = confidence
+        
+        # Calculate convergence/divergence with price for additional insight
+        result['metadata']['price_divergence'] = self._check_divergence(market_data, histogram)
+        
+        # Log the analysis
+        self.logger.debug(f"MACD Analysis - Signal: {signal:.2f}, Confidence: {confidence:.2f}")
+        self.last_update_time = time.time()
+        
+        result['metadata']['execution_time'] = time.time() - start_time
+        return result
+    
+    def _check_divergence(self, market_data: pd.DataFrame, histogram: pd.Series) -> str:
+        """
+        Check for bullish or bearish divergence.
+        
+        Args:
+            market_data: DataFrame containing OHLCV data
+            histogram: MACD histogram
+            
+        Returns:
+            String indicating divergence type (bullish, bearish, or none)
+        """
+        # Look at the last 10 periods
+        periods = min(10, len(market_data) - 1)
+        
+        # Get closing prices
+        close = market_data['close'].iloc[-periods:]
+        hist = histogram.iloc[-periods:]
+        
+        # Check for bullish divergence: price makes a lower low but histogram makes a higher low
+        if close.iloc[-1] < close.min() and hist.iloc[-1] > hist.min():
+            return "bullish"
+        
+        # Check for bearish divergence: price makes a higher high but histogram makes a lower high
+        elif close.iloc[-1] > close.max() and hist.iloc[-1] < hist.max():
+            return "bearish"
+            
+        return "none"
+        
+    def get_last_update_time(self):
+        """
+        Get the timestamp of the last update.
+        
+        Returns:
+            Timestamp of the last update or None if no update has been performed
+        """
+        return self.last_update_time 
