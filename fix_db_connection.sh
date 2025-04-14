@@ -41,16 +41,16 @@ else
     
     # Stop the PostgreSQL container
     echo "Stopping PostgreSQL container..."
-    docker-compose stop postgres
+    docker compose stop postgres
     
     # Remove the PostgreSQL container and volume
     echo "Removing PostgreSQL container and volume..."
-    docker-compose rm -f postgres
+    docker compose rm -f postgres
     docker volume rm new_postgres_data || true
     
     # Start the PostgreSQL container
     echo "Starting PostgreSQL container..."
-    docker-compose up -d postgres
+    docker compose up -d postgres
     
     # Wait for PostgreSQL to be ready
     echo "Waiting for PostgreSQL to be ready..."
