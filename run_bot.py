@@ -26,6 +26,8 @@ logger = logging.getLogger("TradingBot")
 # Global variables
 processes = []
 running = True
+MAX_RETRIES = 5
+RETRY_DELAY = 10
 
 def setup_directories():
     """Create necessary directories if they don't exist"""
@@ -49,6 +51,57 @@ def check_dependencies():
         logger.error(f"Missing dependency: {str(e)}")
         logger.error("Please install all required dependencies using: pip install -r requirements.txt")
         return False
+
+def wait_for_services():
+    """Wait for required services to be ready"""
+    import psycopg2
+    import redis
+    
+    # Wait for PostgreSQL
+    postgres_ready = False
+    for attempt in range(MAX_RETRIES):
+        try:
+            conn = psycopg2.connect(
+                host=os.getenv('DB_HOST'),
+                port=os.getenv('DB_PORT'),
+                database=os.getenv('DB_NAME'),
+                user=os.getenv('DB_USER'),
+                password=os.getenv('DB_PASSWORD')
+            )
+            conn.close()
+            postgres_ready = True
+            logger.info("PostgreSQL connection established")
+            break
+        except Exception as e:
+            logger.warning(f"PostgreSQL connection attempt {attempt + 1} failed: {str(e)}")
+            time.sleep(RETRY_DELAY)
+    
+    if not postgres_ready:
+        logger.error("Failed to connect to PostgreSQL after maximum retries")
+        return False
+    
+    # Wait for Redis
+    redis_ready = False
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = redis.Redis(
+                host=os.getenv('REDIS_HOST'),
+                port=int(os.getenv('REDIS_PORT')),
+                decode_responses=True
+            )
+            r.ping()
+            redis_ready = True
+            logger.info("Redis connection established")
+            break
+        except Exception as e:
+            logger.warning(f"Redis connection attempt {attempt + 1} failed: {str(e)}")
+            time.sleep(RETRY_DELAY)
+    
+    if not redis_ready:
+        logger.error("Failed to connect to Redis after maximum retries")
+        return False
+    
+    return True
 
 def start_dashboard():
     """Start the Streamlit dashboard"""
@@ -118,7 +171,9 @@ def main():
     
     # Wait for services to be ready
     logger.info("Waiting for services to initialize...")
-    time.sleep(10)
+    if not wait_for_services():
+        logger.error("Failed to initialize services. Exiting...")
+        return
     
     # Start components
     if not start_dashboard():
