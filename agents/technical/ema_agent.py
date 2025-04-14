@@ -1,194 +1,185 @@
 import pandas as pd
 import numpy as np
-import ta
-from typing import Optional
+import talib
 import logging
+from typing import Dict, Any, List, Tuple
 
-from agents.base.agent import Agent, Signal
+from agents.base_agent import BaseAgent
 from configs.settings import EMA_SHORT, EMA_LONG
 
-class EMAAgent(Agent):
-    """Agent that makes decisions based on Exponential Moving Average (EMA) crossovers"""
+class EMAAgent(BaseAgent):
+    """
+    EMA (Exponential Moving Average) trading agent.
+    Uses multiple EMAs for trend detection and crossover signals.
+    """
     
-    def __init__(self, symbol: str, timeframe: str, 
-                 short_period: int = EMA_SHORT,
+    def __init__(self, short_period: int = EMA_SHORT, 
                  long_period: int = EMA_LONG):
         """
-        Initialize the EMA Agent
+        Initialize EMA agent with configurable parameters.
         
         Args:
-            symbol: Trading pair symbol (e.g., BTC/USDT)
-            timeframe: Timeframe for analysis (e.g., 1m, 5m, 15m)
-            short_period: Short EMA period (default: from settings)
-            long_period: Long EMA period (default: from settings)
+            short_period (int): Short EMA period
+            long_period (int): Long EMA period
         """
-        super().__init__(name="EMA", symbol=symbol, timeframe=timeframe)
+        super().__init__("EMA")
         self.short_period = short_period
         self.long_period = long_period
-        self.confidence = 0.0
+        self.logger = logging.getLogger("EMAAgent")
         
-        # Store last values for signal generation
-        self.current_short_ema = None
-        self.current_long_ema = None
-        self.prev_short_ema = None
-        self.prev_long_ema = None
-        self.current_price = None
-        
-    def analyze(self, data: pd.DataFrame) -> Signal:
+    def calculate_emas(self, prices: pd.Series) -> Tuple[pd.Series, pd.Series]:
         """
-        Analyze market data using EMA crossovers
+        Calculate short and long EMAs.
         
         Args:
-            data: DataFrame containing OHLCV data
+            prices (pd.Series): Price series
             
         Returns:
-            Signal: Trading signal enum
+            Tuple[pd.Series, pd.Series]: (Short EMA, Long EMA)
         """
-        if not self.validate_data(data):
-            self.logger.error("Invalid data format for EMA analysis")
-            return Signal.NEUTRAL
+        short_ema = talib.EMA(prices, timeperiod=self.short_period)
+        long_ema = talib.EMA(prices, timeperiod=self.long_period)
+        return short_ema, long_ema
+    
+    def calculate_trend_strength(self, short_ema: float, long_ema: float, 
+                               price: float) -> float:
+        """
+        Calculate trend strength based on EMA positions and price.
         
-        df = self.preprocess_data(data)
-        
-        # Calculate EMAs
-        df['short_ema'] = ta.trend.EMAIndicator(
-            close=df['close'], 
-            window=self.short_period
-        ).ema_indicator()
-        
-        df['long_ema'] = ta.trend.EMAIndicator(
-            close=df['close'],
-            window=self.long_period
-        ).ema_indicator()
-        
-        # Store previous and current values
-        if len(df) >= 2:
-            self.prev_short_ema = df['short_ema'].iloc[-2]
-            self.prev_long_ema = df['long_ema'].iloc[-2]
+        Args:
+            short_ema (float): Short EMA value
+            long_ema (float): Long EMA value
+            price (float): Current price
             
-            self.current_short_ema = df['short_ema'].iloc[-1]
-            self.current_long_ema = df['long_ema'].iloc[-1]
-            self.current_price = df['close'].iloc[-1]
-        else:
-            self.prev_short_ema = None
-            self.prev_long_ema = None
-            self.current_short_ema = df['short_ema'].iloc[-1]
-            self.current_long_ema = df['long_ema'].iloc[-1]
-            self.current_price = df['close'].iloc[-1]
-        
-        # Generate signal based on EMA values
-        signal = self._generate_signal()
-        
-        # Calculate confidence based on crossover strength
-        self._calculate_confidence()
-        
-        return signal
-    
-    def _generate_signal(self) -> Signal:
-        """
-        Generate trading signal based on EMA values
-        
         Returns:
-            Signal: Trading signal enum
+            float: Trend strength between -1 and 1
         """
-        if any(v is None for v in [self.current_short_ema, self.current_long_ema, self.current_price]):
-            return Signal.NEUTRAL
+        # Calculate EMA alignment
+        ema_alignment = (short_ema - long_ema) / long_ema
         
-        # Calculate percentage difference between EMAs
-        ema_diff_pct = ((self.current_short_ema - self.current_long_ema) / self.current_long_ema) * 100
-        
-        # Strong signals when EMAs are far apart
-        if ema_diff_pct > 1.0:  # More than 1% difference
-            return Signal.STRONG_BUY
-        elif ema_diff_pct < -1.0:
-            return Signal.STRONG_SELL
-        
-        # Check for crossovers if we have previous values
-        if all(v is not None for v in [self.prev_short_ema, self.prev_long_ema]):
-            # Bullish crossover
-            if self.prev_short_ema < self.prev_long_ema and self.current_short_ema > self.current_long_ema:
-                return Signal.BUY
-            # Bearish crossover
-            elif self.prev_short_ema > self.prev_long_ema and self.current_short_ema < self.current_long_ema:
-                return Signal.SELL
-        
-        # Current position relative to EMAs
-        if self.current_price > self.current_short_ema > self.current_long_ema:
-            return Signal.BUY
-        elif self.current_price < self.current_short_ema < self.current_long_ema:
-            return Signal.SELL
-        
-        return Signal.NEUTRAL
-    
-    def _calculate_confidence(self):
-        """Calculate confidence level based on EMA values"""
-        if any(v is None for v in [self.current_short_ema, self.current_long_ema, self.current_price]):
-            self.confidence = 0.0
-            return
-        
-        # Calculate confidence based on:
-        # 1. Distance between EMAs
-        # 2. Price position relative to EMAs
-        # 3. Trend consistency
-        
-        # Distance between EMAs (40% weight)
-        ema_diff_pct = abs((self.current_short_ema - self.current_long_ema) / self.current_long_ema) * 100
-        distance_confidence = min(1.0, ema_diff_pct / 2.0) * 0.4  # Normalize to max 2% difference
-        
-        # Price position relative to EMAs (30% weight)
-        position_confidence = 0.0
-        if self.current_price > max(self.current_short_ema, self.current_long_ema):
-            position_confidence = 0.3  # Price above both EMAs
-        elif self.current_price < min(self.current_short_ema, self.current_long_ema):
-            position_confidence = 0.3  # Price below both EMAs
-        
-        # Trend consistency (30% weight)
-        trend_confidence = 0.0
-        if self.prev_short_ema is not None and self.prev_long_ema is not None:
-            prev_diff = self.prev_short_ema - self.prev_long_ema
-            curr_diff = self.current_short_ema - self.current_long_ema
-            if (prev_diff > 0 and curr_diff > 0) or (prev_diff < 0 and curr_diff < 0):
-                trend_confidence = 0.3
-        
-        self.confidence = distance_confidence + position_confidence + trend_confidence
-    
-    def get_confidence(self) -> float:
-        """
-        Return the confidence level of the agent's prediction
-        
-        Returns:
-            float: Confidence level between 0.0 and 1.0
-        """
-        return self.confidence
-    
-    def get_explanation(self) -> str:
-        """
-        Get explanation of the agent's reasoning
-        
-        Returns:
-            str: Explanation text
-        """
-        if any(v is None for v in [self.current_short_ema, self.current_long_ema, self.current_price]):
-            return "EMA values not available for analysis"
-        
-        signal = self._generate_signal()
-        
-        explanation = f"EMA Analysis:\n"
-        explanation += f"Short EMA ({self.short_period}): {self.current_short_ema:.2f}\n"
-        explanation += f"Long EMA ({self.long_period}): {self.current_long_ema:.2f}\n"
-        explanation += f"Current Price: {self.current_price:.2f}\n\n"
-        
-        ema_diff_pct = ((self.current_short_ema - self.current_long_ema) / self.current_long_ema) * 100
-        
-        if signal == Signal.STRONG_BUY:
-            explanation += f"Strong bullish trend with EMAs significantly separated ({ema_diff_pct:.2f}% difference)."
-        elif signal == Signal.BUY:
-            explanation += "Bullish trend with short EMA crossing above long EMA."
-        elif signal == Signal.STRONG_SELL:
-            explanation += f"Strong bearish trend with EMAs significantly separated ({-ema_diff_pct:.2f}% difference)."
-        elif signal == Signal.SELL:
-            explanation += "Bearish trend with short EMA crossing below long EMA."
-        else:
-            explanation += "No significant trend detected between EMAs."
+        # Calculate price position relative to EMAs
+        if short_ema > long_ema:  # Bullish alignment
+            price_position = (price - short_ema) / short_ema
+            strength = 0.5 + (ema_alignment * 0.3) + (price_position * 0.2)
+        else:  # Bearish alignment
+            price_position = (short_ema - price) / short_ema
+            strength = -0.5 - (abs(ema_alignment) * 0.3) - (price_position * 0.2)
             
-        return explanation 
+        return np.clip(strength, -1, 1)
+    
+    def detect_crossover(self, short_ema: pd.Series, long_ema: pd.Series) -> str:
+        """
+        Detect EMA crossover signals.
+        
+        Args:
+            short_ema (pd.Series): Short EMA series
+            long_ema (pd.Series): Long EMA series
+            
+        Returns:
+            str: Crossover signal ('bullish', 'bearish', or 'none')
+        """
+        if len(short_ema) < 2 or len(long_ema) < 2:
+            return 'none'
+            
+        # Check for crossover in the last two periods
+        prev_diff = short_ema.iloc[-2] - long_ema.iloc[-2]
+        curr_diff = short_ema.iloc[-1] - long_ema.iloc[-1]
+        
+        if prev_diff < 0 and curr_diff > 0:
+            return 'bullish'
+        elif prev_diff > 0 and curr_diff < 0:
+            return 'bearish'
+        return 'none'
+    
+    def analyze(self, data: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Analyze price data using EMA strategy.
+        
+        Args:
+            data (pd.DataFrame): OHLCV data with 'close' prices
+            
+        Returns:
+            Dict[str, Any]: Analysis results including signal and confidence
+        """
+        try:
+            # Calculate EMAs
+            short_ema, long_ema = self.calculate_emas(data['close'])
+            
+            # Get latest values
+            current_price = data['close'].iloc[-1]
+            current_short_ema = short_ema.iloc[-1]
+            current_long_ema = long_ema.iloc[-1]
+            
+            # Calculate trend strength
+            strength = self.calculate_trend_strength(
+                current_short_ema, current_long_ema, current_price
+            )
+            
+            # Detect crossover
+            crossover = self.detect_crossover(short_ema, long_ema)
+            
+            # Determine signal direction
+            if strength > 0.2 or crossover == 'bullish':
+                signal = 'buy'
+            elif strength < -0.2 or crossover == 'bearish':
+                signal = 'sell'
+            else:
+                signal = 'hold'
+            
+            # Calculate confidence based on trend strength and crossover
+            base_confidence = abs(strength)
+            if crossover != 'none':
+                base_confidence = min(1.0, base_confidence + 0.2)
+            
+            # Additional indicators
+            ema_spread = (current_short_ema - current_long_ema) / current_long_ema
+            price_to_short = (current_price - current_short_ema) / current_short_ema
+            ema_trend = short_ema.iloc[-1] - short_ema.iloc[-5]  # Short-term trend
+            
+            return {
+                'signal': signal,
+                'confidence': base_confidence,
+                'strength': strength,
+                'crossover': crossover,
+                'indicators': {
+                    'short_ema': current_short_ema,
+                    'long_ema': current_long_ema,
+                    'ema_spread': ema_spread,
+                    'price_to_short': price_to_short,
+                    'ema_trend': ema_trend
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error in EMA analysis: {str(e)}")
+            return {
+                'signal': 'hold',
+                'confidence': 0.0,
+                'strength': 0.0,
+                'crossover': 'none',
+                'indicators': {}
+            }
+    
+    def get_parameters(self) -> Dict[str, Any]:
+        """
+        Get agent parameters.
+        
+        Returns:
+            Dict[str, Any]: Agent parameters
+        """
+        return {
+            'short_period': self.short_period,
+            'long_period': self.long_period
+        }
+    
+    def update_parameters(self, parameters: Dict[str, Any]) -> None:
+        """
+        Update agent parameters.
+        
+        Args:
+            parameters (Dict[str, Any]): New parameters
+        """
+        if 'short_period' in parameters:
+            self.short_period = parameters['short_period']
+        if 'long_period' in parameters:
+            self.long_period = parameters['long_period'] 
