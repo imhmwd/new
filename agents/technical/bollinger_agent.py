@@ -1,199 +1,178 @@
 import pandas as pd
 import numpy as np
 import talib
+from typing import Optional, Tuple
 import logging
-from typing import Dict, Any, List, Tuple, Optional
 
-from agents.base_agent import BaseAgent
+from agents.base.agent import Agent, Signal
 from configs.settings import BOLLINGER_PERIOD, BOLLINGER_STD
 
-class BollingerAgent(BaseAgent):
-    """
-    Bollinger Bands agent for technical analysis.
-    Generates trading signals based on price position relative to bands.
-    """
+class BollingerBandsAgent(Agent):
+    """Agent that makes decisions based on Bollinger Bands"""
     
-    def __init__(self, period: int = BOLLINGER_PERIOD, 
+    def __init__(self, symbol: str, timeframe: str, 
+                 period: int = BOLLINGER_PERIOD, 
                  std_dev: float = BOLLINGER_STD):
         """
-        Initialize Bollinger Bands agent with configurable parameters.
+        Initialize the Bollinger Bands Agent
         
         Args:
-            period (int): Moving average period
-            std_dev (float): Number of standard deviations for bands
+            symbol: Trading pair symbol (e.g., BTC/USDT)
+            timeframe: Timeframe for analysis (e.g., 1m, 5m, 15m)
+            period: Bollinger Bands period (default: from settings)
+            std_dev: Number of standard deviations for bands (default: from settings)
         """
-        super().__init__("Bollinger")
+        super().__init__(name="BollingerBands", symbol=symbol, timeframe=timeframe)
         self.period = period
         self.std_dev = std_dev
+        self.current_price = None
+        self.current_upper = None
+        self.current_middle = None
+        self.current_lower = None
+        self.confidence = 0.0
         
-        self.logger = logging.getLogger("BollingerAgent")
-        
-    def _calculate_bands(self, data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def analyze(self, data: pd.DataFrame) -> Signal:
         """
-        Calculate Bollinger Bands.
-        
-        Args:
-            data (pd.DataFrame): OHLCV data
-            
-        Returns:
-            Tuple[np.ndarray, np.ndarray, np.ndarray]: (Upper band, Middle band, Lower band)
-        """
-        try:
-            upper, middle, lower = talib.BBANDS(
-                data['close'].values,
-                timeperiod=self.period,
-                nbdevup=self.std_dev,
-                nbdevdn=self.std_dev
-            )
-            return upper, middle, lower
-        except Exception as e:
-            self.logger.error(f"Error calculating Bollinger Bands: {str(e)}")
-            return np.zeros_like(data['close']), np.zeros_like(data['close']), np.zeros_like(data['close'])
-    
-    def _calculate_band_width(self, upper: np.ndarray, lower: np.ndarray, 
-                            middle: np.ndarray) -> float:
-        """
-        Calculate normalized Bollinger Band width.
+        Analyze market data using Bollinger Bands
         
         Args:
-            upper (np.ndarray): Upper band values
-            lower (np.ndarray): Lower band values
-            middle (np.ndarray): Middle band values
+            data: DataFrame containing OHLCV data
             
         Returns:
-            float: Normalized band width
+            Signal: Trading signal enum
         """
-        band_width = (upper[-1] - lower[-1]) / middle[-1]
-        return float(band_width)
-    
-    def _calculate_price_position(self, price: float, upper: float, 
-                                lower: float) -> float:
-        """
-        Calculate normalized price position within bands.
+        if not self.validate_data(data):
+            self.logger.error("Invalid data format for Bollinger Bands analysis")
+            return Signal.NEUTRAL
         
-        Args:
-            price (float): Current price
-            upper (float): Upper band value
-            lower (float): Lower band value
-            
-        Returns:
-            float: Normalized position between -1 and 1
-        """
-        band_range = upper - lower
-        if band_range == 0:
-            return 0.0
+        df = self.preprocess_data(data)
         
-        # Calculate position relative to middle of the band
-        middle = (upper + lower) / 2
-        position = (price - middle) / (band_range / 2)
-        return float(np.clip(position, -1, 1))
-    
-    def _calculate_signal_strength(self, price: float, upper: float, 
-                                 lower: float, middle: float) -> float:
-        """
-        Calculate the strength of the Bollinger Bands signal.
-        
-        Args:
-            price (float): Current price
-            upper (float): Upper band value
-            lower (float): Lower band value
-            middle (float): Middle band value
-            
-        Returns:
-            float: Signal strength between 0 and 1
-        """
-        # Calculate various strength indicators
-        price_position = abs(self._calculate_price_position(price, upper, lower))
-        band_width = self._calculate_band_width(
-            np.array([upper]), np.array([lower]), np.array([middle])
+        # Calculate Bollinger Bands
+        upper, middle, lower = talib.BBANDS(
+            df['close'].values,
+            timeperiod=self.period,
+            nbdevup=self.std_dev,
+            nbdevdn=self.std_dev,
+            matype=0  # Simple Moving Average
         )
         
-        # Normalize band width (assuming typical range)
-        normalized_width = min(band_width / 0.1, 1.0)  # 0.1 is typical max width
+        # Store current values
+        self.current_price = df['close'].iloc[-1]
+        self.current_upper = upper[-1]
+        self.current_middle = middle[-1]
+        self.current_lower = lower[-1]
         
-        # Weight and combine indicators
-        strength = (0.7 * price_position + 0.3 * normalized_width)
-        return min(max(strength, 0), 1)  # Ensure between 0 and 1
+        # Calculate Bollinger Band width and %B
+        self.current_bandwidth = (self.current_upper - self.current_lower) / self.current_middle
+        
+        if self.current_upper == self.current_lower:  # Avoid division by zero
+            self.current_percent_b = 0.5
+        else:
+            self.current_percent_b = (self.current_price - self.current_lower) / (self.current_upper - self.current_lower)
+        
+        # Generate signal
+        signal = self._generate_signal()
+        
+        # Calculate confidence
+        self._calculate_confidence()
+        
+        return signal
     
-    def analyze(self, data: pd.DataFrame) -> Dict[str, Any]:
+    def _generate_signal(self) -> Signal:
         """
-        Analyze market data and generate trading signals.
+        Generate trading signal based on Bollinger Bands
         
-        Args:
-            data (pd.DataFrame): OHLCV data
-            
         Returns:
-            Dict[str, Any]: Analysis results including signal and confidence
+            Signal: Trading signal enum
         """
-        try:
-            # Calculate Bollinger Bands
-            upper, middle, lower = self._calculate_bands(data)
-            
-            # Get current values
-            current_price = data['close'].iloc[-1]
-            current_upper = upper[-1]
-            current_lower = lower[-1]
-            current_middle = middle[-1]
-            
-            # Determine signal based on price position
-            if current_price > current_upper:
-                signal_type = 'sell'  # Overbought
-            elif current_price < current_lower:
-                signal_type = 'buy'   # Oversold
+        if (self.current_price is None or 
+            self.current_upper is None or 
+            self.current_middle is None or 
+            self.current_lower is None):
+            return Signal.NEUTRAL
+        
+        # Price breaks above upper band (potential sell)
+        if self.current_price > self.current_upper:
+            # Check if extremely above upper band
+            if self.current_price > self.current_upper * 1.01:
+                return Signal.STRONG_SELL
             else:
-                signal_type = 'hold'
+                return Signal.SELL
+        
+        # Price breaks below lower band (potential buy)
+        elif self.current_price < self.current_lower:
+            # Check if extremely below lower band
+            if self.current_price < self.current_lower * 0.99:
+                return Signal.STRONG_BUY
+            else:
+                return Signal.BUY
+        
+        # Price is near upper band
+        elif self.current_price > self.current_upper * 0.97:
+            return Signal.SELL
+        
+        # Price is near lower band
+        elif self.current_price < self.current_lower * 1.03:
+            return Signal.BUY
             
-            # Calculate signal strength
-            strength = self._calculate_signal_strength(
-                current_price, current_upper, current_lower, current_middle
-            )
-            
-            # Calculate additional indicators
-            band_width = self._calculate_band_width(upper, lower, middle)
-            price_position = self._calculate_price_position(
-                current_price, current_upper, current_lower
-            )
-            
-            return {
-                'signal': signal_type,
-                'confidence': float(strength),
-                'indicators': {
-                    'upper_band': float(current_upper),
-                    'middle_band': float(current_middle),
-                    'lower_band': float(current_lower),
-                    'band_width': float(band_width),
-                    'price_position': float(price_position)
-                }
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error in Bollinger Bands analysis: {str(e)}")
-            return {
-                'signal': 'hold',
-                'confidence': 0.0,
-                'indicators': {}
-            }
+        return Signal.NEUTRAL
     
-    def get_parameters(self) -> Dict[str, Any]:
+    def _calculate_confidence(self):
+        """Calculate confidence level based on Bollinger Band values"""
+        if (self.current_price is None or 
+            self.current_upper is None or 
+            self.current_lower is None):
+            self.confidence = 0.0
+            return
+        
+        # Calculate confidence based on %B (distance from middle band relative to width)
+        if self.current_percent_b < 0:  # Below lower band
+            self.confidence = min(1.0, 0.5 + abs(self.current_percent_b))
+        elif self.current_percent_b > 1:  # Above upper band
+            self.confidence = min(1.0, 0.5 + (self.current_percent_b - 1))
+        else:  # Inside the bands
+            # Lower confidence when closer to middle band
+            self.confidence = min(0.7, abs(self.current_percent_b - 0.5) * 2)
+            
+    def get_confidence(self) -> float:
         """
-        Get agent parameters.
+        Return the confidence level of the agent's prediction
         
         Returns:
-            Dict[str, Any]: Agent parameters
+            float: Confidence level between 0.0 and 1.0
         """
-        return {
-            'period': self.period,
-            'std_dev': self.std_dev
-        }
+        return self.confidence
     
-    def update_parameters(self, parameters: Dict[str, Any]) -> None:
+    def get_explanation(self) -> str:
         """
-        Update agent parameters.
+        Get explanation of the agent's reasoning
         
-        Args:
-            parameters (Dict[str, Any]): New parameters
+        Returns:
+            str: Explanation text
         """
-        if 'period' in parameters:
-            self.period = parameters['period']
-        if 'std_dev' in parameters:
-            self.std_dev = parameters['std_dev'] 
+        if (self.current_price is None or 
+            self.current_upper is None or 
+            self.current_middle is None or 
+            self.current_lower is None):
+            return "Bollinger Bands values not available for analysis"
+        
+        signal = self._generate_signal()
+        
+        # Format values for display
+        price_value = f"{self.current_price:.2f}"
+        upper_value = f"{self.current_upper:.2f}"
+        middle_value = f"{self.current_middle:.2f}"
+        lower_value = f"{self.current_lower:.2f}"
+        percent_b = f"{self.current_percent_b:.2f}"
+        bandwidth = f"{self.current_bandwidth:.4f}"
+        
+        if signal == Signal.STRONG_BUY:
+            return f"Price ({price_value}) is extremely below the lower Bollinger Band ({lower_value}, %B={percent_b}). Strong buy signal."
+        elif signal == Signal.BUY:
+            return f"Price ({price_value}) is below or near the lower Bollinger Band ({lower_value}, %B={percent_b}). Buy signal."
+        elif signal == Signal.STRONG_SELL:
+            return f"Price ({price_value}) is extremely above the upper Bollinger Band ({upper_value}, %B={percent_b}). Strong sell signal."
+        elif signal == Signal.SELL:
+            return f"Price ({price_value}) is above or near the upper Bollinger Band ({upper_value}, %B={percent_b}). Sell signal."
+        else:
+            return f"Price ({price_value}) is within Bollinger Bands (Upper: {upper_value}, Middle: {middle_value}, Lower: {lower_value}, %B={percent_b}, BW={bandwidth})." 
