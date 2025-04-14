@@ -8,11 +8,21 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     postgresql-client \
     curl \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
+# Install TA-Lib
+RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
+    tar -xvzf ta-lib-0.4.0-src.tar.gz && \
+    cd ta-lib/ && \
+    ./configure --prefix=/usr && \
+    make && \
+    make install && \
+    cd .. && \
+    rm -rf ta-lib-0.4.0-src.tar.gz ta-lib/
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
 # Copy the application code
 COPY . .
@@ -30,16 +40,5 @@ ENV PYTHONPATH=/app
 # Expose port for the dashboard
 EXPOSE 8501
 
-# Create entrypoint script
-COPY <<-"EOF" /app/entrypoint.sh
-#!/bin/bash
-echo "Starting database connection fix..."
-./fix_db_connection.sh
-echo "Starting Streamlit dashboard..."
-streamlit run dashboard/app.py
-EOF
-
-RUN chmod +x /app/entrypoint.sh
-
-# Set the entrypoint
-ENTRYPOINT ["/app/entrypoint.sh"]
+# Set the command to run the application
+CMD ["bash", "-c", "./fix_db_connection.sh && streamlit run dashboard/app.py"]
