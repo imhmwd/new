@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
     postgresql-client \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
@@ -30,12 +31,15 @@ ENV PYTHONPATH=/app
 EXPOSE 8501
 
 # Create entrypoint script
-RUN echo '#!/bin/bash\n\
-echo "Starting database connection fix..."\n\
-./fix_db_connection.sh\n\
-echo "Starting Streamlit dashboard..."\n\
-streamlit run dashboard/app.py\n\
-' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+COPY <<-"EOF" /app/entrypoint.sh
+#!/bin/bash
+echo "Starting database connection fix..."
+./fix_db_connection.sh
+echo "Starting Streamlit dashboard..."
+streamlit run dashboard/app.py
+EOF
+
+RUN chmod +x /app/entrypoint.sh
 
 # Set the entrypoint
 ENTRYPOINT ["/app/entrypoint.sh"]
