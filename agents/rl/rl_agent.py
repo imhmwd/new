@@ -5,29 +5,46 @@ from typing import Dict, Any, List, Tuple, Optional
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from collections import deque
+from torch.distributions import Categorical
 import random
 
 from agents.base_agent import BaseAgent
-from configs.settings import RL_MEMORY_SIZE, RL_BATCH_SIZE, RL_GAMMA, RL_EPSILON_START, RL_EPSILON_END, RL_EPSILON_DECAY
+from configs.settings import (
+    RL_BATCH_SIZE, RL_GAMMA, RL_EPSILON_START, 
+    RL_EPSILON_END, RL_EPSILON_DECAY
+)
 
-class DQN(nn.Module):
+class ActorCritic(nn.Module):
     """
-    Deep Q-Network for reinforcement learning.
+    Actor-Critic network for PPO algorithm.
     """
-    def __init__(self, input_size: int, hidden_size: int, output_size: int):
+    def __init__(self, input_size: int, hidden_size: int, action_size: int):
         """
-        Initialize the DQN model.
+        Initialize the Actor-Critic model.
         
         Args:
             input_size (int): Size of input features
             hidden_size (int): Size of hidden layers
-            output_size (int): Size of output (action space)
+            action_size (int): Size of action space
         """
-        super(DQN, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, output_size)
+        super(ActorCritic, self).__init__()
+        
+        # Shared feature extractor
+        self.feature_extractor = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU()
+        )
+        
+        # Actor head (policy network)
+        self.actor = nn.Sequential(
+            nn.Linear(hidden_size, action_size),
+            nn.Softmax(dim=-1)
+        )
+        
+        # Critic head (value network)
+        self.critic = nn.Linear(hidden_size, 1)
         
     def forward(self, x):
         """
@@ -37,24 +54,49 @@ class DQN(nn.Module):
             x: Input tensor
             
         Returns:
-            Output tensor
+            Tuple containing action probabilities and state value
         """
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        return self.fc3(x)
+        features = self.feature_extractor(x)
+        action_probs = self.actor(features)
+        state_value = self.critic(features)
+        return action_probs, state_value
+    
+    def get_action(self, state, device):
+        """
+        Sample an action from the policy.
+        
+        Args:
+            state: Current state
+            device: Torch device
+            
+        Returns:
+            Tuple containing action, log probability, and entropy
+        """
+        state = torch.FloatTensor(state).unsqueeze(0).to(device)
+        action_probs, _ = self.forward(state)
+        
+        # Create a categorical distribution over action probabilities
+        dist = Categorical(action_probs)
+        
+        # Sample an action
+        action = dist.sample()
+        
+        # Calculate log probability and entropy
+        log_prob = dist.log_prob(action)
+        entropy = dist.entropy()
+        
+        return action.item(), log_prob, entropy
 
 class RLAgent(BaseAgent):
     """
-    Reinforcement Learning agent using Deep Q-Learning.
+    Reinforcement Learning agent using Proximal Policy Optimization (PPO).
     Learns optimal trading strategies through experience.
     """
     
     def __init__(self, state_size: int = 10, hidden_size: int = 64, 
-                 action_size: int = 3, memory_size: int = RL_MEMORY_SIZE,
-                 batch_size: int = RL_BATCH_SIZE, gamma: float = RL_GAMMA,
-                 epsilon_start: float = RL_EPSILON_START, 
-                 epsilon_end: float = RL_EPSILON_END,
-                 epsilon_decay: float = RL_EPSILON_DECAY):
+                 action_size: int = 3, batch_size: int = RL_BATCH_SIZE, 
+                 gamma: float = RL_GAMMA, clip_ratio: float = 0.2,
+                 learning_rate: float = 3e-4, update_epochs: int = 4):
         """
         Initialize RL agent with configurable parameters.
         
@@ -62,40 +104,43 @@ class RLAgent(BaseAgent):
             state_size (int): Size of state space
             hidden_size (int): Size of hidden layers
             action_size (int): Size of action space
-            memory_size (int): Size of replay memory
             batch_size (int): Size of training batches
             gamma (float): Discount factor
-            epsilon_start (float): Initial exploration rate
-            epsilon_end (float): Final exploration rate
-            epsilon_decay (float): Exploration decay rate
+            clip_ratio (float): PPO clipping parameter
+            learning_rate (float): Learning rate for optimizer
+            update_epochs (int): Number of epochs to update policy
         """
         super().__init__("RL")
         self.state_size = state_size
         self.hidden_size = hidden_size
         self.action_size = action_size
-        self.memory_size = memory_size
         self.batch_size = batch_size
         self.gamma = gamma
-        self.epsilon = epsilon_start
-        self.epsilon_end = epsilon_end
-        self.epsilon_decay = epsilon_decay
+        self.clip_ratio = clip_ratio
+        self.learning_rate = learning_rate
+        self.update_epochs = update_epochs
         
-        # Initialize neural networks
+        # Initialize device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.policy_net = DQN(state_size, hidden_size, action_size).to(self.device)
-        self.target_net = DQN(state_size, hidden_size, action_size).to(self.device)
-        self.target_net.load_state_dict(self.policy_net.state_dict())
+        
+        # Initialize actor-critic network
+        self.model = ActorCritic(state_size, hidden_size, action_size).to(self.device)
         
         # Initialize optimizer
-        self.optimizer = optim.Adam(self.policy_net.parameters())
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         
-        # Initialize replay memory
-        self.memory = deque(maxlen=memory_size)
+        # Initialize experience buffers
+        self.states = []
+        self.actions = []
+        self.log_probs = []
+        self.rewards = []
+        self.values = []
+        self.masks = []
         
         # Initialize state tracking
         self.current_state = None
         self.current_action = None
-        self.current_reward = None
+        self.current_log_prob = None
         
         self.logger = logging.getLogger("RLAgent")
         
@@ -140,6 +185,9 @@ class RLAgent(BaseAgent):
             rsi_norm[-2] if len(rsi_norm) > 1 else 0
         ])
         
+        # Replace NaN values with 0
+        state = np.nan_to_num(state, nan=0.0)
+        
         return state
     
     def _calculate_rsi(self, prices: np.ndarray, period: int = 14) -> np.ndarray:
@@ -177,26 +225,7 @@ class RLAgent(BaseAgent):
             
         return rsi
     
-    def _select_action(self, state: np.ndarray) -> int:
-        """
-        Select action using epsilon-greedy policy.
-        
-        Args:
-            state (np.ndarray): Current state
-            
-        Returns:
-            int: Selected action index
-        """
-        if random.random() < self.epsilon:
-            return random.randrange(self.action_size)
-        
-        with torch.no_grad():
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            q_values = self.policy_net(state_tensor)
-            return q_values.argmax().item()
-    
-    def _get_reward(self, action: int, next_price: float, 
-                   current_price: float) -> float:
+    def _get_reward(self, action: int, next_price: float, current_price: float) -> float:
         """
         Calculate reward based on action and price change.
         
@@ -213,66 +242,78 @@ class RLAgent(BaseAgent):
         if action == 0:  # Sell
             return -price_change
         elif action == 1:  # Hold
-            return 0.0
+            return 0.001  # Small reward for holding
         else:  # Buy
             return price_change
     
-    def _remember(self, state: np.ndarray, action: int, 
-                 reward: float, next_state: np.ndarray, done: bool):
+    def _update_policy(self):
         """
-        Store experience in replay memory.
-        
-        Args:
-            state (np.ndarray): Current state
-            action (int): Selected action
-            reward (float): Received reward
-            next_state (np.ndarray): Next state
-            done (bool): Whether episode is done
+        Update policy using PPO algorithm.
         """
-        self.memory.append((state, action, reward, next_state, done))
-    
-    def _train(self):
-        """
-        Train the agent using experience replay.
-        """
-        if len(self.memory) < self.batch_size:
+        if len(self.states) < self.batch_size:
             return
         
-        # Sample random batch from memory
-        batch = random.sample(self.memory, self.batch_size)
-        states, actions, rewards, next_states, dones = zip(*batch)
-        
         # Convert to tensors
-        states = torch.FloatTensor(states).to(self.device)
-        actions = torch.LongTensor(actions).to(self.device)
-        rewards = torch.FloatTensor(rewards).to(self.device)
-        next_states = torch.FloatTensor(next_states).to(self.device)
-        dones = torch.FloatTensor(dones).to(self.device)
+        states = torch.FloatTensor(self.states).to(self.device)
+        actions = torch.LongTensor(self.actions).to(self.device)
+        old_log_probs = torch.stack(self.log_probs).to(self.device)
+        rewards = torch.FloatTensor(self.rewards).to(self.device)
+        masks = torch.FloatTensor(self.masks).to(self.device)
         
-        # Get current Q values
-        current_q_values = self.policy_net(states).gather(1, actions.unsqueeze(1))
+        # Calculate returns
+        returns = []
+        gae = 0
+        for i in reversed(range(len(rewards))):
+            delta = rewards[i] + self.gamma * self.values[i+1] * masks[i] - self.values[i]
+            gae = delta + self.gamma * 0.95 * masks[i] * gae
+            returns.insert(0, gae + self.values[i])
         
-        # Get next Q values from target net
-        with torch.no_grad():
-            next_q_values = self.target_net(next_states).max(1)[0]
-            target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
+        returns = torch.FloatTensor(returns).to(self.device)
         
-        # Compute loss and update
-        loss = nn.MSELoss()(current_q_values.squeeze(), target_q_values)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        # Normalize returns
+        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
         
-        # Update epsilon
-        self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
-    
-    def _update_target_network(self):
-        """
-        Update target network with policy network weights.
-        """
-        self.target_net.load_state_dict(self.policy_net.state_dict())
-    
-    def analyze(self, data: pd.DataFrame) -> Dict[str, Any]:
+        # Update for multiple epochs
+        for _ in range(self.update_epochs):
+            # Get current policy and values
+            action_probs, values = self.model(states)
+            values = values.squeeze()
+            
+            # Get log probabilities of actions
+            curr_log_probs = action_probs.log_prob(actions)
+            
+            # Calculate entropy
+            entropy = action_probs.entropy().mean()
+            
+            # Calculate ratio (pi_theta / pi_theta_old)
+            ratios = torch.exp(curr_log_probs - old_log_probs.detach())
+            
+            # Calculate surrogate loss
+            advantages = returns - values.detach()
+            surr1 = ratios * advantages
+            surr2 = torch.clamp(ratios, 1.0 - self.clip_ratio, 1.0 + self.clip_ratio) * advantages
+            
+            # Calculate actor and critic losses
+            actor_loss = -torch.min(surr1, surr2).mean()
+            critic_loss = nn.MSELoss()(values, returns)
+            
+            # Combined loss
+            loss = actor_loss + 0.5 * critic_loss - 0.01 * entropy
+            
+            # Update model
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+        
+        # Clear buffers
+        self.states = []
+        self.actions = []
+        self.log_probs = []
+        self.rewards = []
+        self.values = []
+        self.masks = []
+        
+    def analyze_market(self, data: pd.DataFrame) -> Dict[str, Any]:
         """
         Analyze market data and select action.
         
@@ -286,61 +327,70 @@ class RLAgent(BaseAgent):
             # Preprocess state
             state = self._preprocess_state(data)
             
-            # Select action
-            action = self._select_action(state)
+            # Get action from policy
+            action, log_prob, entropy = self.model.get_action(state, self.device)
+            
+            # Get state value
+            with torch.no_grad():
+                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+                _, state_value = self.model(state_tensor)
+                state_value = state_value.item()
             
             # Map action to signal
             if action == 0:
-                signal = 'sell'
+                signal = 'SELL'
             elif action == 1:
-                signal = 'hold'
+                signal = 'HOLD'
             else:  # action == 2
-                signal = 'buy'
+                signal = 'BUY'
             
-            # Calculate confidence based on Q-values
+            # Calculate confidence based on action probability
             with torch.no_grad():
-                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-                q_values = self.policy_net(state_tensor).squeeze().cpu().numpy()
-                confidence = abs(q_values[action]) / (abs(q_values).sum() + 1e-10)
+                action_probs, _ = self.model(state_tensor)
+                confidence = action_probs[0, action].item()
             
-            # If we have a previous state, calculate reward and train
-            if self.current_state is not None:
+            # If we have a previous state, calculate reward and add to buffers
+            if self.current_state is not None and self.current_action is not None:
                 next_price = data['close'].iloc[-1]
                 current_price = data['close'].iloc[-2]
                 reward = self._get_reward(self.current_action, next_price, current_price)
                 
-                # Store experience
-                self._remember(self.current_state, self.current_action, reward, state, False)
+                # Add to buffers
+                self.states.append(self.current_state)
+                self.actions.append(self.current_action)
+                self.log_probs.append(self.current_log_prob)
+                self.rewards.append(reward)
+                self.values.append(state_value)
+                self.masks.append(1.0)  # Non-terminal state
                 
-                # Train the agent
-                self._train()
-                
-                # Update target network periodically
-                if len(self.memory) % 100 == 0:
-                    self._update_target_network()
+                # Update policy if enough data
+                if len(self.states) >= self.batch_size:
+                    self._update_policy()
             
             # Update current state and action
             self.current_state = state
             self.current_action = action
+            self.current_log_prob = log_prob
             
             return {
                 'signal': signal,
                 'confidence': float(confidence),
                 'action': action,
-                'epsilon': self.epsilon,
+                'entropy': float(entropy),
+                'value': float(state_value),
                 'indicators': {
                     'state': state.tolist(),
-                    'q_values': q_values.tolist() if 'q_values' in locals() else []
                 }
             }
             
         except Exception as e:
             self.logger.error(f"Error in RL analysis: {str(e)}")
             return {
-                'signal': 'hold',
+                'signal': 'HOLD',
                 'confidence': 0.0,
                 'action': 1,
-                'epsilon': self.epsilon,
+                'entropy': 0.0,
+                'value': 0.0,
                 'indicators': {}
             }
     
@@ -355,12 +405,11 @@ class RLAgent(BaseAgent):
             'state_size': self.state_size,
             'hidden_size': self.hidden_size,
             'action_size': self.action_size,
-            'memory_size': self.memory_size,
             'batch_size': self.batch_size,
             'gamma': self.gamma,
-            'epsilon': self.epsilon,
-            'epsilon_end': self.epsilon_end,
-            'epsilon_decay': self.epsilon_decay
+            'clip_ratio': self.clip_ratio,
+            'learning_rate': self.learning_rate,
+            'update_epochs': self.update_epochs
         }
     
     def update_parameters(self, parameters: Dict[str, Any]) -> None:
@@ -376,18 +425,16 @@ class RLAgent(BaseAgent):
             self.hidden_size = parameters['hidden_size']
         if 'action_size' in parameters:
             self.action_size = parameters['action_size']
-        if 'memory_size' in parameters:
-            self.memory_size = parameters['memory_size']
         if 'batch_size' in parameters:
             self.batch_size = parameters['batch_size']
         if 'gamma' in parameters:
             self.gamma = parameters['gamma']
-        if 'epsilon' in parameters:
-            self.epsilon = parameters['epsilon']
-        if 'epsilon_end' in parameters:
-            self.epsilon_end = parameters['epsilon_end']
-        if 'epsilon_decay' in parameters:
-            self.epsilon_decay = parameters['epsilon_decay']
+        if 'clip_ratio' in parameters:
+            self.clip_ratio = parameters['clip_ratio']
+        if 'learning_rate' in parameters:
+            self.learning_rate = parameters['learning_rate']
+        if 'update_epochs' in parameters:
+            self.update_epochs = parameters['update_epochs']
     
     def save_model(self, path: str) -> None:
         """
@@ -397,10 +444,8 @@ class RLAgent(BaseAgent):
             path (str): Path to save model
         """
         torch.save({
-            'policy_net': self.policy_net.state_dict(),
-            'target_net': self.target_net.state_dict(),
-            'optimizer': self.optimizer.state_dict(),
-            'epsilon': self.epsilon
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
         }, path)
     
     def load_model(self, path: str) -> None:
@@ -411,7 +456,5 @@ class RLAgent(BaseAgent):
             path (str): Path to load model from
         """
         checkpoint = torch.load(path)
-        self.policy_net.load_state_dict(checkpoint['policy_net'])
-        self.target_net.load_state_dict(checkpoint['target_net'])
-        self.optimizer.load_state_dict(checkpoint['optimizer'])
-        self.epsilon = checkpoint['epsilon'] 
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict']) 
