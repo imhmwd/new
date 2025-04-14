@@ -1,16 +1,16 @@
 import numpy as np
 import pandas as pd
-import talib
 import logging
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional
+import talib
 
 from agents.base_agent import BaseAgent
 from configs.settings import MACD_FAST, MACD_SLOW, MACD_SIGNAL
 
 class MACDAgent(BaseAgent):
     """
-    MACD (Moving Average Convergence Divergence) trading agent.
-    Uses MACD, signal line, and histogram for trading signals.
+    MACD (Moving Average Convergence Divergence) agent for technical analysis.
+    Generates trading signals based on MACD crossovers and divergences.
     """
     
     def __init__(self, fast_period: int = MACD_FAST, 
@@ -28,101 +28,112 @@ class MACDAgent(BaseAgent):
         self.fast_period = fast_period
         self.slow_period = slow_period
         self.signal_period = signal_period
+        
         self.logger = logging.getLogger("MACDAgent")
         
-    def calculate_macd(self, prices: pd.Series) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    def _calculate_macd(self, data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Calculate MACD, signal line, and histogram.
+        Calculate MACD indicator values.
         
         Args:
-            prices (pd.Series): Price series
+            data (pd.DataFrame): OHLCV data
             
         Returns:
-            Tuple[pd.Series, pd.Series, pd.Series]: (MACD line, Signal line, Histogram)
+            Tuple[np.ndarray, np.ndarray, np.ndarray]: (MACD line, Signal line, Histogram)
         """
-        macd, signal, hist = talib.MACD(
-            prices,
-            fastperiod=self.fast_period,
-            slowperiod=self.slow_period,
-            signalperiod=self.signal_period
-        )
-        return macd, signal, hist
+        try:
+            macd, signal, hist = talib.MACD(
+                data['close'].values,
+                fastperiod=self.fast_period,
+                slowperiod=self.slow_period,
+                signalperiod=self.signal_period
+            )
+            return macd, signal, hist
+        except Exception as e:
+            self.logger.error(f"Error calculating MACD: {str(e)}")
+            return np.zeros_like(data['close']), np.zeros_like(data['close']), np.zeros_like(data['close'])
     
-    def calculate_signal_strength(self, macd: float, signal: float, hist: float) -> float:
+    def _calculate_histogram_change(self, hist: np.ndarray) -> float:
         """
-        Calculate signal strength based on MACD components.
+        Calculate the rate of change in histogram.
         
         Args:
-            macd (float): MACD line value
-            signal (float): Signal line value
-            hist (float): Histogram value
+            hist (np.ndarray): MACD histogram values
             
         Returns:
-            float: Signal strength between -1 and 1
+            float: Rate of change
         """
-        # Normalize histogram by MACD range
-        if abs(macd) > 0:
-            hist_strength = hist / abs(macd)
-        else:
-            hist_strength = 0
+        if len(hist) < 2:
+            return 0.0
+        return (hist[-1] - hist[-2]) / abs(hist[-2]) if hist[-2] != 0 else 0.0
+    
+    def _calculate_signal_strength(self, macd: np.ndarray, signal: np.ndarray, 
+                                 hist: np.ndarray) -> float:
+        """
+        Calculate the strength of the MACD signal.
+        
+        Args:
+            macd (np.ndarray): MACD line values
+            signal (np.ndarray): Signal line values
+            hist (np.ndarray): Histogram values
             
-        # Combine MACD crossover and histogram strength
-        if macd > signal:  # Bullish
-            strength = 0.5 + (hist_strength * 0.5)
-        else:  # Bearish
-            strength = -0.5 - (hist_strength * 0.5)
-            
-        return np.clip(strength, -1, 1)
+        Returns:
+            float: Signal strength between 0 and 1
+        """
+        # Calculate various strength indicators
+        macd_signal_diff = abs(macd[-1] - signal[-1])
+        hist_strength = abs(hist[-1])
+        hist_change = abs(self._calculate_histogram_change(hist))
+        
+        # Normalize and combine indicators
+        max_diff = max(abs(macd).max(), abs(signal).max())
+        normalized_diff = macd_signal_diff / max_diff if max_diff != 0 else 0
+        
+        max_hist = abs(hist).max()
+        normalized_hist = hist_strength / max_hist if max_hist != 0 else 0
+        
+        # Weight and combine indicators
+        strength = (0.4 * normalized_diff + 0.4 * normalized_hist + 0.2 * hist_change)
+        return min(max(strength, 0), 1)  # Ensure between 0 and 1
     
     def analyze(self, data: pd.DataFrame) -> Dict[str, Any]:
         """
-        Analyze price data using MACD strategy.
+        Analyze market data and generate trading signals.
         
         Args:
-            data (pd.DataFrame): OHLCV data with 'close' prices
+            data (pd.DataFrame): OHLCV data
             
         Returns:
             Dict[str, Any]: Analysis results including signal and confidence
         """
         try:
-            # Calculate MACD components
-            macd, signal, hist = self.calculate_macd(data['close'])
+            # Calculate MACD indicators
+            macd, signal, hist = self._calculate_macd(data)
             
-            # Get latest values
-            current_macd = macd.iloc[-1]
-            current_signal = signal.iloc[-1]
-            current_hist = hist.iloc[-1]
+            # Determine signal based on MACD crossover
+            if macd[-1] > signal[-1] and macd[-2] <= signal[-2]:
+                signal_type = 'buy'
+            elif macd[-1] < signal[-1] and macd[-2] >= signal[-2]:
+                signal_type = 'sell'
+            else:
+                signal_type = 'hold'
             
             # Calculate signal strength
-            strength = self.calculate_signal_strength(
-                current_macd, current_signal, current_hist
-            )
+            strength = self._calculate_signal_strength(macd, signal, hist)
             
-            # Determine signal direction
-            if strength > 0.2:  # Strong bullish
-                signal = 'buy'
-            elif strength < -0.2:  # Strong bearish
-                signal = 'sell'
-            else:
-                signal = 'hold'
-            
-            # Calculate confidence based on signal strength
-            confidence = abs(strength)
-            
-            # Additional indicators
-            hist_change = hist.iloc[-1] - hist.iloc[-2]  # Histogram momentum
-            macd_trend = macd.iloc[-1] - macd.iloc[-5]  # MACD trend
+            # Calculate additional indicators
+            histogram_change = self._calculate_histogram_change(hist)
+            trend_direction = 'up' if macd[-1] > 0 else 'down'
             
             return {
-                'signal': signal,
-                'confidence': confidence,
-                'strength': strength,
+                'signal': signal_type,
+                'confidence': float(strength),
                 'indicators': {
-                    'macd': current_macd,
-                    'signal': current_signal,
-                    'histogram': current_hist,
-                    'hist_change': hist_change,
-                    'macd_trend': macd_trend
+                    'macd': float(macd[-1]),
+                    'signal': float(signal[-1]),
+                    'histogram': float(hist[-1]),
+                    'histogram_change': float(histogram_change),
+                    'trend_direction': trend_direction
                 }
             }
             
@@ -131,7 +142,6 @@ class MACDAgent(BaseAgent):
             return {
                 'signal': 'hold',
                 'confidence': 0.0,
-                'strength': 0.0,
                 'indicators': {}
             }
     

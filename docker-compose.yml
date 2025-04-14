@@ -2,63 +2,56 @@ version: '3.8'
 
 services:
   trading_bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    volumes:
-      - .:/app
-      - ./logs:/app/logs
-    env_file:
-      - .env
-    depends_on:
-      - redis
-      - postgres
-    networks:
-      - trading_network
-
-  dashboard:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    command: streamlit run dashboard/app.py
-    volumes:
-      - .:/app
-    env_file:
-      - .env
+    build: .
     ports:
-      - "8501:8501"
+      - "8501:8501"  # Streamlit dashboard
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./models:/app/models
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=trading_bot
+      - DB_USER=trading_bot
+      - DB_PASSWORD=trading_bot_password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
-      - trading_bot
-      - redis
-    networks:
-      - trading_network
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:14-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=trading_bot
+      - POSTGRES_USER=trading_bot
+      - POSTGRES_PASSWORD=trading_bot_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading_bot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
-    restart: unless-stopped
+    ports:
+      - "6379:6379"
     volumes:
       - redis_data:/data
-    networks:
-      - trading_network
-
-  postgres:
-    image: postgres:15-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: trading_bot
-      POSTGRES_USER: "${DB_USER:-postgres}"
-      POSTGRES_PASSWORD: "${DB_PASSWORD:-postgres}"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - trading_network
-
-networks:
-  trading_network:
-    driver: bridge
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
-  redis_data:
   postgres_data:
+  redis_data:

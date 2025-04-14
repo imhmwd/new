@@ -1,163 +1,141 @@
-# AI-Based Crypto Scalping Trading Bot
+# Crypto Trading Bot
 
-An intelligent, modular, and low-latency crypto trading bot optimized for scalping strategies, with a multi-agent architecture and LLM integration.
+A comprehensive cryptocurrency trading bot that uses multiple strategies including technical analysis, sentiment analysis, and predictive modeling to generate trading signals.
 
 ## Features
 
-- **Multi-Agent Architecture**:
-  - Technical Agents (RSI, MACD, EMA, Bollinger Bands, etc.)
-  - Sentiment Analysis using NLP and LLMs
-  - Predictive Models (LSTM, Prophet, XGBoost)
-  - Reinforcement Learning Agents
+- **Multiple Trading Strategies**:
+  - Technical Analysis (RSI, MACD, EMA, Bollinger Bands)
+  - Sentiment Analysis (News, Twitter, Reddit)
+  - Predictive Modeling (LSTM)
+  - Meta-Agent for signal combination
 
-- **Meta-Agent for Decision Fusion**:
-  - Combines insights from all agents
-  - Supports various aggregation methods
+- **Risk Management**:
+  - Position sizing
+  - Stop-loss and take-profit
+  - Trailing stops
+  - Maximum drawdown protection
 
-- **Real-Time Trading**:
-  - Binance API/WebSocket integration
-  - Low-latency execution
+- **Portfolio Management**:
+  - Multi-asset trading
+  - Balance allocation
+  - Open position tracking
 
-- **LLM Integration**:
-  - ChatGPT, Gemini, DeepSeek, and Grok APIs
-  - Advanced reasoning and sentiment analysis
+- **Data Collection**:
+  - Real-time market data via WebSocket
+  - Historical data for backtesting
+  - Sentiment data from multiple sources
 
-- **Visualization**:
-  - Streamlit dashboard
-  - Real-time performance metrics
+## Setup
 
-- **Containerization**:
-  - Docker + docker-compose
+### Prerequisites
+
+- Python 3.8+
+- Binance account with API keys
+- News API key
+- Twitter API keys
+- Reddit API keys
+
+### Installation
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/crypto-trading-bot.git
+   cd crypto-trading-bot
+   ```
+
+2. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+3. Create a `.env` file with your API keys:
+   ```
+   # Binance API Keys
+   BINANCE_API_KEY=your_binance_api_key_here
+   BINANCE_SECRET_KEY=your_binance_secret_key_here
+
+   # News API Key
+   NEWS_API_KEY=your_news_api_key_here
+
+   # Twitter API Keys
+   TWITTER_API_KEY=your_twitter_api_key_here
+   TWITTER_API_SECRET=your_twitter_api_secret_here
+   TWITTER_ACCESS_TOKEN=your_twitter_access_token_here
+   TWITTER_ACCESS_SECRET=your_twitter_access_secret_here
+
+   # Reddit API Keys
+   REDDIT_CLIENT_ID=your_reddit_client_id_here
+   REDDIT_CLIENT_SECRET=your_reddit_client_secret_here
+
+   # Trading Settings
+   TRADING_PAIRS=BTC/USDT,ETH/USDT,SOL/USDT
+   TIMEFRAMES=1m,5m,15m
+   TRADE_AMOUNT_USDT=10
+   MAX_OPEN_TRADES=3
+   RISK_PER_TRADE=0.01
+   MAX_DRAWDOWN=0.05
+   ```
+
+## Usage
+
+### Testing the Bot
+
+Run the test script to verify that all components are working correctly:
+
+```
+python test_bot.py
+```
+
+### Running the Bot
+
+Start the trading bot:
+
+```
+python -m bot.trading_bot
+```
+
+By default, the bot runs in test mode (paper trading). To run in live mode, modify the `test_mode` parameter in the `TradingBot` initialization.
+
+### Configuration
+
+You can customize the bot's behavior by modifying the settings in `configs/settings.py` or by updating the environment variables in the `.env` file.
 
 ## Project Structure
 
 ```
-AI Trading Bot
-├── agents/
-│   ├── technical/ (RSI, MACD, EMA, Bollinger, VWAP, etc.)
-│   ├── sentiment/ (NLP on news + Twitter)
-│   ├── predictive/ (LSTM, Prophet, XGBoost)
-│   └── rl_agents/ (PPO, DQN)
-├── meta_agent/
-│   └── combiner.py (decision fusion: voting, weighted, ML)
-├── execution/
-│   ├── binance_ws.py (live price feed)
-│   └── binance.py (trade execution)
-├── data/
-│   ├── ohlcv_loader.py
-│   └── sentiment_feed.py
-├── portfolio/
-│   ├── manager.py
-│   └── stoploss.py
-├── dashboard/
-│   └── app.py (Streamlit-based UI)
-├── configs/
-│   └── settings.py
-├── logs/
-│   └── structured trade/event logging
-├── requirements.txt
-├── Dockerfile
-├── docker-compose.yml
-└── .env
+crypto-trading-bot/
+├── agents/                  # Trading agents
+│   ├── base_agent.py        # Base agent class
+│   ├── meta/                # Meta-agent for signal combination
+│   ├── predictive/          # Predictive modeling agents
+│   ├── rl/                  # Reinforcement learning agents
+│   ├── sentiment/           # Sentiment analysis agents
+│   └── technical/           # Technical analysis agents
+├── bot/                     # Main bot implementation
+│   └── trading_bot.py       # Trading bot orchestrator
+├── configs/                 # Configuration files
+│   └── settings.py          # Global settings
+├── data/                    # Data handling
+│   ├── binance_ws.py        # Binance WebSocket client
+│   ├── ohlcv_loader.py      # OHLCV data loader
+│   └── sentiment_feed.py    # Sentiment data feed
+├── database/                # Database management
+│   └── db_manager.py        # Database operations
+├── execution/               # Trade execution
+│   └── binance.py           # Binance trader
+├── portfolio/               # Portfolio management
+│   └── portfolio_manager.py # Portfolio operations
+├── .env                     # Environment variables
+├── requirements.txt         # Dependencies
+├── test_bot.py              # Test script
+└── README.md                # Documentation
 ```
 
-## Tech Stack
+## License
 
-| Layer | Technology |
-|-------|------------|
-| Core | Python 3.9+ |
-| ML / RL | NumPy, Scikit-learn, TensorFlow / Stable-Baselines3 |
-| Data | pandas, ccxt |
-| Dashboard | Streamlit, Plotly |
-| Realtime | Binance WebSocket |
-| Containerization | Docker, docker-compose |
-| Storage / Cache | PostgreSQL, Redis |
-| AI APIs | OpenAI ChatGPT, Gemini, Grok (xAI), DeepSeek, Claude |
-| Env Management | python-dotenv, .env |
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Setup Instructions
+## Disclaimer
 
-### Prerequisites
-- Python 3.9 or higher
-- Docker and docker-compose (optional)
-- Binance account with API keys (for live trading)
-- LLM API keys (optional, for sentiment analysis)
-
-### Installation
-
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/yourusername/ai-crypto-trading-bot.git
-   cd ai-crypto-trading-bot
-   ```
-
-2. Create a virtual environment (optional but recommended):
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. Install the requirements:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. Create a `.env` file with your API keys:
-   ```
-   BINANCE_API_KEY=your_binance_api_key
-   BINANCE_SECRET_KEY=your_binance_secret_key
-   OPENAI_API_KEY=your_openai_api_key
-   ```
-
-### Running the Bot
-
-#### Using Python
-
-Run the trading bot in paper trading mode:
-```bash
-python main.py --symbol BTC/USDT --timeframe 5m --mode paper --strategy combined
-```
-
-Options:
-- `--symbol`: Trading pair (default: BTC/USDT)
-- `--timeframe`: Candlestick timeframe (default: 5m)
-- `--mode`: Trading mode - paper, live, backtest (default: paper)
-- `--strategy`: Trading strategy - technical, sentiment, combined (default: combined)
-- `--amount`: Amount to trade in USDT (default: from settings)
-- `--risk`: Risk per trade in percentage (default: from settings)
-- `--interval`: Interval between trading cycles in seconds (default: 60)
-- `--use-llm`: Use LLM for sentiment analysis and reasoning
-
-#### Using Docker
-
-Build and run with Docker Compose:
-```bash
-docker-compose up -d
-```
-
-### Running the Dashboard
-
-The dashboard allows you to monitor the bot's performance and manually execute trades:
-
-```bash
-streamlit run dashboard/app.py
-```
-
-When using Docker, the dashboard is available at http://localhost:8501
-
-## Configuration
-
-Configure your trading strategy and preferences in `configs/settings.py`
-
-## Adding New Agents
-
-To add a new agent:
-
-1. Create a new file in the appropriate directory (technical, sentiment, predictive, rl_agents)
-2. Inherit from the base `Agent` class
-3. Implement the required methods (analyze, get_confidence, get_explanation)
-4. Add the agent to the `create_agents()` function in `main.py`
-
-## Warning
-
-This is a complex trading system with significant financial risk. Use at your own risk and always start with paper trading to test your strategies.
+This trading bot is for educational purposes only. Use at your own risk. The developers are not responsible for any financial losses incurred from using this software.

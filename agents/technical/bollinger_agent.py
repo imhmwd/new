@@ -2,19 +2,19 @@ import pandas as pd
 import numpy as np
 import talib
 import logging
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 
 from agents.base_agent import BaseAgent
-from configs.settings import BB_PERIOD, BB_STD
+from configs.settings import BOLLINGER_PERIOD, BOLLINGER_STD
 
 class BollingerAgent(BaseAgent):
     """
-    Bollinger Bands trading agent.
-    Uses price position relative to bands and band width for trading signals.
+    Bollinger Bands agent for technical analysis.
+    Generates trading signals based on price position relative to bands.
     """
     
-    def __init__(self, period: int = BB_PERIOD, 
-                 std_dev: float = BB_STD):
+    def __init__(self, period: int = BOLLINGER_PERIOD, 
+                 std_dev: float = BOLLINGER_STD):
         """
         Initialize Bollinger Bands agent with configurable parameters.
         
@@ -25,134 +25,144 @@ class BollingerAgent(BaseAgent):
         super().__init__("Bollinger")
         self.period = period
         self.std_dev = std_dev
+        
         self.logger = logging.getLogger("BollingerAgent")
         
-    def calculate_bands(self, prices: pd.Series) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    def _calculate_bands(self, data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Calculate Bollinger Bands.
         
         Args:
-            prices (pd.Series): Price series
+            data (pd.DataFrame): OHLCV data
             
         Returns:
-            Tuple[pd.Series, pd.Series, pd.Series]: (Middle Band, Upper Band, Lower Band)
+            Tuple[np.ndarray, np.ndarray, np.ndarray]: (Upper band, Middle band, Lower band)
         """
-        middle, upper, lower = talib.BBANDS(
-            prices,
-            timeperiod=self.period,
-            nbdevup=self.std_dev,
-            nbdevdn=self.std_dev
-        )
-        return middle, upper, lower
+        try:
+            upper, middle, lower = talib.BBANDS(
+                data['close'].values,
+                timeperiod=self.period,
+                nbdevup=self.std_dev,
+                nbdevdn=self.std_dev
+            )
+            return upper, middle, lower
+        except Exception as e:
+            self.logger.error(f"Error calculating Bollinger Bands: {str(e)}")
+            return np.zeros_like(data['close']), np.zeros_like(data['close']), np.zeros_like(data['close'])
     
-    def calculate_band_width(self, upper: float, middle: float, lower: float) -> float:
+    def _calculate_band_width(self, upper: np.ndarray, lower: np.ndarray, 
+                            middle: np.ndarray) -> float:
         """
-        Calculate Bollinger Band width.
+        Calculate normalized Bollinger Band width.
         
         Args:
-            upper (float): Upper band value
-            middle (float): Middle band value
-            lower (float): Lower band value
+            upper (np.ndarray): Upper band values
+            lower (np.ndarray): Lower band values
+            middle (np.ndarray): Middle band values
             
         Returns:
-            float: Band width as percentage of middle band
+            float: Normalized band width
         """
-        return (upper - lower) / middle
+        band_width = (upper[-1] - lower[-1]) / middle[-1]
+        return float(band_width)
     
-    def calculate_price_position(self, price: float, upper: float, 
-                               middle: float, lower: float) -> float:
+    def _calculate_price_position(self, price: float, upper: float, 
+                                lower: float) -> float:
         """
-        Calculate price position relative to bands.
+        Calculate normalized price position within bands.
         
         Args:
             price (float): Current price
             upper (float): Upper band value
-            middle (float): Middle band value
             lower (float): Lower band value
             
         Returns:
-            float: Price position between -1 and 1
+            float: Normalized position between -1 and 1
         """
         band_range = upper - lower
         if band_range == 0:
-            return 0
-            
-        # Calculate position relative to middle band
+            return 0.0
+        
+        # Calculate position relative to middle of the band
+        middle = (upper + lower) / 2
         position = (price - middle) / (band_range / 2)
-        return np.clip(position, -1, 1)
+        return float(np.clip(position, -1, 1))
+    
+    def _calculate_signal_strength(self, price: float, upper: float, 
+                                 lower: float, middle: float) -> float:
+        """
+        Calculate the strength of the Bollinger Bands signal.
+        
+        Args:
+            price (float): Current price
+            upper (float): Upper band value
+            lower (float): Lower band value
+            middle (float): Middle band value
+            
+        Returns:
+            float: Signal strength between 0 and 1
+        """
+        # Calculate various strength indicators
+        price_position = abs(self._calculate_price_position(price, upper, lower))
+        band_width = self._calculate_band_width(
+            np.array([upper]), np.array([lower]), np.array([middle])
+        )
+        
+        # Normalize band width (assuming typical range)
+        normalized_width = min(band_width / 0.1, 1.0)  # 0.1 is typical max width
+        
+        # Weight and combine indicators
+        strength = (0.7 * price_position + 0.3 * normalized_width)
+        return min(max(strength, 0), 1)  # Ensure between 0 and 1
     
     def analyze(self, data: pd.DataFrame) -> Dict[str, Any]:
         """
-        Analyze price data using Bollinger Bands strategy.
+        Analyze market data and generate trading signals.
         
         Args:
-            data (pd.DataFrame): OHLCV data with 'close' prices
+            data (pd.DataFrame): OHLCV data
             
         Returns:
             Dict[str, Any]: Analysis results including signal and confidence
         """
         try:
             # Calculate Bollinger Bands
-            middle, upper, lower = self.calculate_bands(data['close'])
+            upper, middle, lower = self._calculate_bands(data)
             
-            # Get latest values
+            # Get current values
             current_price = data['close'].iloc[-1]
-            current_middle = middle.iloc[-1]
-            current_upper = upper.iloc[-1]
-            current_lower = lower.iloc[-1]
+            current_upper = upper[-1]
+            current_lower = lower[-1]
+            current_middle = middle[-1]
             
-            # Calculate indicators
-            band_width = self.calculate_band_width(
-                current_upper, current_middle, current_lower
-            )
-            price_position = self.calculate_price_position(
-                current_price, current_upper, current_middle, current_lower
-            )
-            
-            # Calculate band width trend
-            prev_width = self.calculate_band_width(
-                upper.iloc[-2], middle.iloc[-2], lower.iloc[-2]
-            )
-            width_trend = band_width - prev_width
-            
-            # Determine signal based on price position and band width
-            if price_position < -0.8 and band_width > 0.02:  # Strong oversold
-                signal = 'buy'
-                strength = -price_position  # Convert to positive for buy signal
-            elif price_position > 0.8 and band_width > 0.02:  # Strong overbought
-                signal = 'sell'
-                strength = price_position
+            # Determine signal based on price position
+            if current_price > current_upper:
+                signal_type = 'sell'  # Overbought
+            elif current_price < current_lower:
+                signal_type = 'buy'   # Oversold
             else:
-                signal = 'hold'
-                strength = 0.0
+                signal_type = 'hold'
             
-            # Calculate confidence based on multiple factors
-            position_confidence = abs(price_position)  # How far from middle band
-            width_confidence = min(1.0, band_width * 10)  # Band width factor
-            trend_confidence = abs(width_trend) * 5  # Band width trend factor
+            # Calculate signal strength
+            strength = self._calculate_signal_strength(
+                current_price, current_upper, current_lower, current_middle
+            )
             
-            # Combine confidence factors
-            confidence = (position_confidence * 0.5 + 
-                        width_confidence * 0.3 + 
-                        trend_confidence * 0.2)
-            
-            # Additional indicators
-            price_to_middle = (current_price - current_middle) / current_middle
-            band_squeeze = band_width < 0.01  # Narrow bands indicate potential breakout
+            # Calculate additional indicators
+            band_width = self._calculate_band_width(upper, lower, middle)
+            price_position = self._calculate_price_position(
+                current_price, current_upper, current_lower
+            )
             
             return {
-                'signal': signal,
-                'confidence': confidence,
-                'strength': strength,
+                'signal': signal_type,
+                'confidence': float(strength),
                 'indicators': {
-                    'middle_band': current_middle,
-                    'upper_band': current_upper,
-                    'lower_band': current_lower,
-                    'band_width': band_width,
-                    'width_trend': width_trend,
-                    'price_position': price_position,
-                    'price_to_middle': price_to_middle,
-                    'band_squeeze': band_squeeze
+                    'upper_band': float(current_upper),
+                    'middle_band': float(current_middle),
+                    'lower_band': float(current_lower),
+                    'band_width': float(band_width),
+                    'price_position': float(price_position)
                 }
             }
             
@@ -161,7 +171,6 @@ class BollingerAgent(BaseAgent):
             return {
                 'signal': 'hold',
                 'confidence': 0.0,
-                'strength': 0.0,
                 'indicators': {}
             }
     

@@ -22,31 +22,27 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 # Database settings
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "postgres"),
-    "port": int(os.getenv("DB_PORT", 5432)),
-    "name": os.getenv("DB_NAME", "trading_bot"),
-    "user": os.getenv("DB_USER", "postgres"),
-    "password": os.getenv("DB_PASSWORD", "postgres"),
-}
+DB_HOST = os.getenv('DB_HOST', 'localhost')
+DB_PORT = int(os.getenv('DB_PORT', '5432'))
+DB_NAME = os.getenv('DB_NAME', 'trading_bot')
+DB_USER = os.getenv('DB_USER', 'trading_bot')
+DB_PASSWORD = os.getenv('DB_PASSWORD', 'trading_bot_password')
 
 # Redis settings
-REDIS_CONFIG = {
-    "host": os.getenv("REDIS_HOST", "redis"),
-    "port": int(os.getenv("REDIS_PORT", 6379)),
-}
+REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+REDIS_PORT = int(os.getenv('REDIS_PORT', '6379'))
 
 # Trading pairs
-TRADING_PAIRS = os.getenv("TRADING_PAIRS", "BTC/USDT,ETH/USDT,SOL/USDT").split(",")
+TRADING_PAIRS = os.getenv('TRADING_PAIRS', 'BTC/USDT,ETH/USDT,BNB/USDT').split(',')
 
 # Trading parameters
-TRADE_AMOUNT_USDT = float(os.getenv("TRADE_AMOUNT_USDT", 10))
-MAX_OPEN_TRADES = int(os.getenv("MAX_OPEN_TRADES", 3))
-RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", 0.01))
-MAX_DRAWDOWN = float(os.getenv("MAX_DRAWDOWN", 0.05))
+TRADE_AMOUNT_USDT = float(os.getenv('TRADE_AMOUNT_USDT', '100.0'))
+MAX_OPEN_TRADES = int(os.getenv('MAX_OPEN_TRADES', '10'))
+RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '0.01'))
+MAX_DRAWDOWN = float(os.getenv('MAX_DRAWDOWN', '0.10'))
 
 # Technical analysis settings
-TIMEFRAMES = os.getenv("TIMEFRAMES", "1m,5m,15m").split(",")
+TIMEFRAMES = os.getenv('TIMEFRAMES', '1m,3m,5m,15m').split(',')
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", 14))
 RSI_OVERBOUGHT = int(os.getenv("RSI_OVERBOUGHT", 70))
 RSI_OVERSOLD = int(os.getenv("RSI_OVERSOLD", 30))
@@ -57,7 +53,7 @@ MACD_SLOW = int(os.getenv("MACD_SLOW", 26))
 MACD_SIGNAL = int(os.getenv("MACD_SIGNAL", 9))
 
 # System settings
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 DEBUG_MODE = os.getenv("DEBUG_MODE", "False").lower() == "true"
 
 # Agent weights for meta-agent
@@ -93,43 +89,67 @@ BACKTEST_START_DATE = os.getenv("BACKTEST_START_DATE", "2023-01-01")
 BACKTEST_END_DATE = os.getenv("BACKTEST_END_DATE", "2023-12-31")
 
 # Portfolio Management Settings
-INITIAL_BALANCE_USDT = 10000.0  # Initial portfolio balance in USDT
-TRADE_AMOUNT_USDT = 100.0      # Maximum amount per trade in USDT
-MAX_OPEN_TRADES = 5            # Maximum number of concurrent open positions
-RISK_PER_TRADE = 0.02         # Maximum risk per trade (2% of portfolio)
-MAX_DRAWDOWN = 0.20           # Maximum allowed drawdown (20%)
+INITIAL_BALANCE_USDT = float(os.getenv('INITIAL_BALANCE_USDT', '10000.0'))
+TRADE_AMOUNT_USDT = float(os.getenv('TRADE_AMOUNT_USDT', '100.0'))
+MAX_OPEN_TRADES = int(os.getenv('MAX_OPEN_TRADES', '10'))
+RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '0.01'))
+MAX_DRAWDOWN = float(os.getenv('MAX_DRAWDOWN', '0.10'))
 
 # Position Management Settings
-DEFAULT_STOP_LOSS_PCT = 0.02   # Default stop loss percentage (2%)
-DEFAULT_TAKE_PROFIT_PCT = 0.04 # Default take profit percentage (4%)
-TRAILING_STOP_PCT = 0.01       # Trailing stop percentage (1%)
+DEFAULT_STOP_LOSS_PCT = float(os.getenv('DEFAULT_STOP_LOSS_PCT', '0.005'))
+DEFAULT_TAKE_PROFIT_PCT = float(os.getenv('DEFAULT_TAKE_PROFIT_PCT', '0.01'))
+TRAILING_STOP_PCT = float(os.getenv('TRAILING_STOP_PCT', '0.003'))
 
 # Trading Pairs
-TRADING_PAIRS = [
-    'BTC/USDT',
-    'ETH/USDT',
-    'BNB/USDT',
-    'SOL/USDT',
-    'ADA/USDT'
-]
+TRADING_PAIRS = os.getenv('TRADING_PAIRS', 'BTC/USDT,ETH/USDT,BNB/USDT').split(',')
 
 # Exchange Settings
-EXCHANGE = 'binance'
-EXCHANGE_TESTNET = True        # Use testnet for development
+EXCHANGE = os.getenv('EXCHANGE', 'binance')
+EXCHANGE_TESTNET = os.getenv('EXCHANGE_TESTNET', 'True').lower() == 'true'
 MARKET_TYPE = 'spot'          # 'spot' or 'futures'
 
 # API Settings
-API_KEY = ''                  # Your exchange API key
-API_SECRET = ''               # Your exchange API secret
+API_KEY = os.getenv('API_KEY', '')
+API_SECRET = os.getenv('API_SECRET', '')
 
 # Timeframes
-TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
-DEFAULT_TIMEFRAME = '1h'
+TIMEFRAMES = os.getenv('TIMEFRAMES', '1m,3m,5m,15m').split(',')
+DEFAULT_TIMEFRAME = os.getenv('DEFAULT_TIMEFRAME', '1m')
 
 # Logging Settings
-LOG_LEVEL = 'INFO'
-LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-LOG_FILE = 'trading_bot.log'
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+LOG_FORMAT = os.getenv('LOG_FORMAT', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+LOG_FILE = os.getenv('LOG_FILE', 'logs/trading_bot.log')
 
 # Database Settings
-DB_PATH = 'data/trading.db'   # SQLite database path 
+DB_PATH = 'data/trading.db'   # SQLite database path
+
+# Predictive Agent Settings
+PRED_HORIZON = 24  # Number of steps to predict ahead
+PRED_SEQUENCE_LENGTH = 60  # Length of input sequences
+PRED_HIDDEN_SIZE = 64  # Size of LSTM hidden layers
+PRED_LEARNING_RATE = 0.001  # Learning rate for optimizer
+PRED_BATCH_SIZE = 32  # Size of training batches
+PRED_EPOCHS = 100  # Number of training epochs
+PRED_MODEL_PATH = 'models/predictive_model.pt'  # Path to save/load model
+
+# Bollinger Bands Settings
+BOLLINGER_PERIOD = 20  # Moving average period
+BOLLINGER_STD = 2.0    # Number of standard deviations for bands
+
+# Sentiment Feed Settings
+NEWS_API_KEY = os.getenv('NEWS_API_KEY', '')
+TWITTER_API_KEY = os.getenv('TWITTER_API_KEY', '')
+TWITTER_API_SECRET = os.getenv('TWITTER_API_SECRET', '')
+TWITTER_ACCESS_TOKEN = os.getenv('TWITTER_ACCESS_TOKEN', '')
+TWITTER_ACCESS_SECRET = os.getenv('TWITTER_ACCESS_SECRET', '')
+REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID', '')
+REDDIT_CLIENT_SECRET = os.getenv('REDDIT_CLIENT_SECRET', '')
+SENTIMENT_UPDATE_INTERVAL = int(os.getenv('SENTIMENT_UPDATE_INTERVAL', '60'))
+
+# Scalping-specific Settings
+MIN_VOLUME_USDT = float(os.getenv('MIN_VOLUME_USDT', '100000'))  # Minimum 24h volume
+MIN_SPREAD_PCT = float(os.getenv('MIN_SPREAD_PCT', '0.001'))  # Maximum spread
+MAX_SLIPPAGE_PCT = float(os.getenv('MAX_SLIPPAGE_PCT', '0.002'))  # Maximum slippage
+MIN_PROFIT_PCT = float(os.getenv('MIN_PROFIT_PCT', '0.003'))  # Minimum profit target
+MAX_TRADE_DURATION = int(os.getenv('MAX_TRADE_DURATION', '300'))  # Maximum trade duration in seconds 

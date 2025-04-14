@@ -2,15 +2,15 @@ import pandas as pd
 import numpy as np
 import talib
 import logging
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 
 from agents.base_agent import BaseAgent
 from configs.settings import EMA_SHORT, EMA_LONG
 
 class EMAAgent(BaseAgent):
     """
-    EMA (Exponential Moving Average) trading agent.
-    Uses multiple EMAs for trend detection and crossover signals.
+    EMA (Exponential Moving Average) agent for technical analysis.
+    Generates trading signals based on EMA crossovers and trends.
     """
     
     def __init__(self, short_period: int = EMA_SHORT, 
@@ -25,128 +25,97 @@ class EMAAgent(BaseAgent):
         super().__init__("EMA")
         self.short_period = short_period
         self.long_period = long_period
+        
         self.logger = logging.getLogger("EMAAgent")
         
-    def calculate_emas(self, prices: pd.Series) -> Tuple[pd.Series, pd.Series]:
+    def _calculate_ema(self, data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
         """
         Calculate short and long EMAs.
         
         Args:
-            prices (pd.Series): Price series
+            data (pd.DataFrame): OHLCV data
             
         Returns:
-            Tuple[pd.Series, pd.Series]: (Short EMA, Long EMA)
+            Tuple[np.ndarray, np.ndarray]: (Short EMA, Long EMA)
         """
-        short_ema = talib.EMA(prices, timeperiod=self.short_period)
-        long_ema = talib.EMA(prices, timeperiod=self.long_period)
-        return short_ema, long_ema
+        try:
+            short_ema = talib.EMA(data['close'].values, timeperiod=self.short_period)
+            long_ema = talib.EMA(data['close'].values, timeperiod=self.long_period)
+            return short_ema, long_ema
+        except Exception as e:
+            self.logger.error(f"Error calculating EMAs: {str(e)}")
+            return np.zeros_like(data['close']), np.zeros_like(data['close'])
     
-    def calculate_trend_strength(self, short_ema: float, long_ema: float, 
-                               price: float) -> float:
+    def _calculate_trend_strength(self, short_ema: np.ndarray, 
+                                long_ema: np.ndarray) -> float:
         """
-        Calculate trend strength based on EMA positions and price.
+        Calculate the strength of the EMA trend.
         
         Args:
-            short_ema (float): Short EMA value
-            long_ema (float): Long EMA value
-            price (float): Current price
+            short_ema (np.ndarray): Short EMA values
+            long_ema (np.ndarray): Long EMA values
             
         Returns:
-            float: Trend strength between -1 and 1
+            float: Trend strength between 0 and 1
         """
-        # Calculate EMA alignment
-        ema_alignment = (short_ema - long_ema) / long_ema
+        # Calculate EMA difference and its rate of change
+        ema_diff = short_ema[-1] - long_ema[-1]
+        ema_diff_prev = short_ema[-2] - long_ema[-2]
+        diff_change = ema_diff - ema_diff_prev
         
         # Calculate price position relative to EMAs
-        if short_ema > long_ema:  # Bullish alignment
-            price_position = (price - short_ema) / short_ema
-            strength = 0.5 + (ema_alignment * 0.3) + (price_position * 0.2)
-        else:  # Bearish alignment
-            price_position = (short_ema - price) / short_ema
-            strength = -0.5 - (abs(ema_alignment) * 0.3) - (price_position * 0.2)
-            
-        return np.clip(strength, -1, 1)
-    
-    def detect_crossover(self, short_ema: pd.Series, long_ema: pd.Series) -> str:
-        """
-        Detect EMA crossover signals.
+        price = short_ema[-1]  # Using short EMA as proxy for current price
+        short_dist = abs(price - short_ema[-1]) / short_ema[-1]
+        long_dist = abs(price - long_ema[-1]) / long_ema[-1]
         
-        Args:
-            short_ema (pd.Series): Short EMA series
-            long_ema (pd.Series): Long EMA series
-            
-        Returns:
-            str: Crossover signal ('bullish', 'bearish', or 'none')
-        """
-        if len(short_ema) < 2 or len(long_ema) < 2:
-            return 'none'
-            
-        # Check for crossover in the last two periods
-        prev_diff = short_ema.iloc[-2] - long_ema.iloc[-2]
-        curr_diff = short_ema.iloc[-1] - long_ema.iloc[-1]
+        # Normalize indicators
+        max_diff = max(abs(short_ema - long_ema).max(), 1e-10)
+        normalized_diff = abs(ema_diff) / max_diff
         
-        if prev_diff < 0 and curr_diff > 0:
-            return 'bullish'
-        elif prev_diff > 0 and curr_diff < 0:
-            return 'bearish'
-        return 'none'
+        max_dist = max(short_dist, long_dist, 1e-10)
+        normalized_dist = 1 - (max_dist / max_dist)
+        
+        # Weight and combine indicators
+        strength = (0.6 * normalized_diff + 0.4 * normalized_dist)
+        return min(max(strength, 0), 1)  # Ensure between 0 and 1
     
     def analyze(self, data: pd.DataFrame) -> Dict[str, Any]:
         """
-        Analyze price data using EMA strategy.
+        Analyze market data and generate trading signals.
         
         Args:
-            data (pd.DataFrame): OHLCV data with 'close' prices
+            data (pd.DataFrame): OHLCV data
             
         Returns:
             Dict[str, Any]: Analysis results including signal and confidence
         """
         try:
             # Calculate EMAs
-            short_ema, long_ema = self.calculate_emas(data['close'])
+            short_ema, long_ema = self._calculate_ema(data)
             
-            # Get latest values
-            current_price = data['close'].iloc[-1]
-            current_short_ema = short_ema.iloc[-1]
-            current_long_ema = long_ema.iloc[-1]
+            # Determine signal based on EMA crossover
+            if short_ema[-1] > long_ema[-1] and short_ema[-2] <= long_ema[-2]:
+                signal_type = 'buy'
+            elif short_ema[-1] < long_ema[-1] and short_ema[-2] >= long_ema[-2]:
+                signal_type = 'sell'
+            else:
+                signal_type = 'hold'
             
             # Calculate trend strength
-            strength = self.calculate_trend_strength(
-                current_short_ema, current_long_ema, current_price
-            )
+            strength = self._calculate_trend_strength(short_ema, long_ema)
             
-            # Detect crossover
-            crossover = self.detect_crossover(short_ema, long_ema)
-            
-            # Determine signal direction
-            if strength > 0.2 or crossover == 'bullish':
-                signal = 'buy'
-            elif strength < -0.2 or crossover == 'bearish':
-                signal = 'sell'
-            else:
-                signal = 'hold'
-            
-            # Calculate confidence based on trend strength and crossover
-            base_confidence = abs(strength)
-            if crossover != 'none':
-                base_confidence = min(1.0, base_confidence + 0.2)
-            
-            # Additional indicators
-            ema_spread = (current_short_ema - current_long_ema) / current_long_ema
-            price_to_short = (current_price - current_short_ema) / current_short_ema
-            ema_trend = short_ema.iloc[-1] - short_ema.iloc[-5]  # Short-term trend
+            # Calculate additional indicators
+            trend_direction = 'up' if short_ema[-1] > long_ema[-1] else 'down'
+            ema_spread = (short_ema[-1] - long_ema[-1]) / long_ema[-1]  # Percentage spread
             
             return {
-                'signal': signal,
-                'confidence': base_confidence,
-                'strength': strength,
-                'crossover': crossover,
+                'signal': signal_type,
+                'confidence': float(strength),
                 'indicators': {
-                    'short_ema': current_short_ema,
-                    'long_ema': current_long_ema,
-                    'ema_spread': ema_spread,
-                    'price_to_short': price_to_short,
-                    'ema_trend': ema_trend
+                    'short_ema': float(short_ema[-1]),
+                    'long_ema': float(long_ema[-1]),
+                    'ema_spread': float(ema_spread),
+                    'trend_direction': trend_direction
                 }
             }
             
@@ -155,8 +124,6 @@ class EMAAgent(BaseAgent):
             return {
                 'signal': 'hold',
                 'confidence': 0.0,
-                'strength': 0.0,
-                'crossover': 'none',
                 'indicators': {}
             }
     

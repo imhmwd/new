@@ -4,26 +4,26 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
     build-essential \
-    git \
-    && apt-get clean \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project
+# Copy the rest of the application
 COPY . .
 
-# Create log directory
-RUN mkdir -p /app/logs
+# Create necessary directories
+RUN mkdir -p data database logs models
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
-# Command to run
-CMD ["python", "-m", "dashboard.app"]
+# Expose port for the dashboard
+EXPOSE 8501
+
+# Command to run the application
+CMD ["python", "run_dashboard.py"]
