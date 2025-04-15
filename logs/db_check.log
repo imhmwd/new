@@ -10,3 +10,15 @@
 2025-04-14 10:53:38,073 - DBCheck - INFO -   - scalping_metrics
 2025-04-14 10:53:38,073 - DBCheck - INFO -   - schema_migrations
 2025-04-14 10:53:38,073 - DBCheck - INFO - Database connection check completed successfully
+2025-04-14 14:56:52,103 - DBCheck - INFO - Checking connection to PostgreSQL at postgres:5432...
+2025-04-14 14:56:52,108 - DBCheck - INFO - Connected to PostgreSQL: PostgreSQL 15.8 (Debian 15.8-1.pgdg120+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 12.2.0-14) 12.2.0, 64-bit
+2025-04-14 14:56:52,113 - DBCheck - INFO - No migrations found in the database
+2025-04-14 14:56:52,114 - DBCheck - INFO - Database tables:
+2025-04-14 14:56:52,114 - DBCheck - INFO -   - trades
+2025-04-14 14:56:52,114 - DBCheck - INFO -   - portfolio
+2025-04-14 14:56:52,114 - DBCheck - INFO -   - market_data
+2025-04-14 14:56:52,115 - DBCheck - INFO -   - signals
+2025-04-14 14:56:52,115 - DBCheck - INFO -   - sentiment_data
+2025-04-14 14:56:52,115 - DBCheck - INFO -   - scalping_metrics
+2025-04-14 14:56:52,115 - DBCheck - INFO -   - schema_migrations
+2025-04-14 14:56:52,115 - DBCheck - INFO - Database connection check completed successfully

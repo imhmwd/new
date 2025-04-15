@@ -4,9 +4,13 @@
 
 echo "Starting Docker containers..."
 
-# Build the Docker image
-echo "Building Docker image..."
-docker compose build
+# Stop any running containers
+echo "Stopping existing containers..."
+docker compose down
+
+# Build the Docker image with no cache to ensure fresh installation
+echo "Building Docker image from scratch..."
+docker compose build --no-cache
 
 # Start the Docker containers
 echo "Starting Docker containers..."
@@ -14,7 +18,7 @@ docker compose up -d
 
 # Wait for the containers to be ready
 echo "Waiting for containers to be ready..."
-sleep 10
+sleep 60
 
 # Check the database connection
 echo "Checking database connection..."

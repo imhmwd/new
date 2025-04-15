@@ -1,7 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
   <component name="ChangeListManager">
-    <list default="true" id="029a80e9-e9d7-4990-bcad-7d80e5c00362" name="Changes" comment="" />
+    <list default="true" id="029a80e9-e9d7-4990-bcad-7d80e5c00362" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/logs/db_check.log" beforeDir="false" afterPath="$PROJECT_DIR$/logs/db_check.log" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/logs/db_init.log" beforeDir="false" afterPath="$PROJECT_DIR$/logs/db_init.log" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/logs/migrations.log" beforeDir="false" afterPath="$PROJECT_DIR$/logs/migrations.log" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/logs/migrations_run.log" beforeDir="false" afterPath="$PROJECT_DIR$/logs/migrations_run.log" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/run_docker.sh" beforeDir="false" afterPath="$PROJECT_DIR$/run_docker.sh" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -49,7 +62,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1744639894195</updated>
-      <workItem from="1744639896298" duration="313000" />
+      <workItem from="1744639896298" duration="1170000" />
     </task>
     <servers />
   </component>

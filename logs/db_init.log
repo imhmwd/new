@@ -6,3 +6,15 @@
 2025-04-14 10:53:38,291 - DBInit - ERROR - Error creating indexes: column "symbol" does not exist
 
 2025-04-14 10:53:38,291 - DBInit - ERROR - Database initialization failed
+2025-04-14 14:50:25,079 - DBInit - INFO - Database tables created successfully
+2025-04-14 14:50:25,080 - DBInit - ERROR - Error creating indexes: column "symbol" does not exist
+
+2025-04-14 14:50:25,081 - DBInit - ERROR - Database initialization failed
+2025-04-14 14:55:52,004 - DBInit - INFO - Database tables created successfully
+2025-04-14 14:55:52,005 - DBInit - ERROR - Error creating indexes: column "symbol" does not exist
+
+2025-04-14 14:55:52,005 - DBInit - ERROR - Database initialization failed
+2025-04-14 14:56:52,320 - DBInit - INFO - Database tables created successfully
+2025-04-14 14:56:52,321 - DBInit - ERROR - Error creating indexes: column "symbol" does not exist
+
+2025-04-14 14:56:52,321 - DBInit - ERROR - Database initialization failed

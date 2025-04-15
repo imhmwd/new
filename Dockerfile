@@ -9,20 +9,28 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     curl \
     wget \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install TA-Lib
+# Install TA-Lib properly
 RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
-    tar -xvzf ta-lib-0.4.0-src.tar.gz && \
+    tar -xzf ta-lib-0.4.0-src.tar.gz && \
     cd ta-lib/ && \
     ./configure --prefix=/usr && \
     make && \
     make install && \
     cd .. && \
-    rm -rf ta-lib-0.4.0-src.tar.gz ta-lib/
+    rm -rf ta-lib-0.4.0-src.tar.gz ta-lib/ && \
+    ldconfig
 
+# Copy requirements first to leverage Docker cache
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+
+# Install Python dependencies
+# Install all requirements except TA-Lib
+RUN pip install --no-cache-dir $(grep -v "ta-lib" requirements.txt) && \
+    pip install --no-cache-dir numpy && \
+    pip install --no-cache-dir ta-lib
 
 # Copy the application code
 COPY . .

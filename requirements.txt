@@ -22,7 +22,7 @@ nltk==3.8.1
 textblob==0.17.1
 
 # Technical analysis
-ta-lib>=0.4.24
+# TA-Lib is installed separately in the Dockerfile
 ta>=0.10.0
 pandas-ta==0.3.14b
 
